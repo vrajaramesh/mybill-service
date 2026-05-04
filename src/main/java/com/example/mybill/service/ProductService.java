@@ -13,6 +13,9 @@ public class ProductService {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired
+    private ProductCategoryRepository productCategoryRepository;
+
     public List<Product> getAllProducts() {
         return productRepository.findAll();
     }
@@ -26,6 +29,14 @@ public class ProductService {
         LocalDateTime now = LocalDateTime.now();
         product.setCreatedAt(now);
         product.setUpdatedAt(now);
+
+        // Handle category lookup if categoryName is provided
+        if (product.getCategory() != null && product.getCategory().getCategoryName() != null) {
+            Optional<ProductCategory> category = productCategoryRepository.findById(product.getCategory().getCategoryName());
+            if (category.isPresent()) {
+                product.setCategory(category.get());
+            }
+        }
 
         // Generate custom product ID
         Optional<Integer> maxId = productRepository.findMaxProductId();
@@ -44,7 +55,15 @@ public class ProductService {
             Product product = optionalProduct.get();
             product.setProductName(productDetails.getProductName());
             product.setDescription(productDetails.getDescription());
-            product.setCategory(productDetails.getCategory());
+
+            // Handle category lookup if categoryName is provided
+            if (productDetails.getCategory() != null && productDetails.getCategory().getCategoryName() != null) {
+                Optional<ProductCategory> category = productCategoryRepository.findById(productDetails.getCategory().getCategoryName());
+                if (category.isPresent()) {
+                    product.setCategory(category.get());
+                }
+            }
+
             product.setUnit(productDetails.getUnit());
             product.setCostPrice(productDetails.getCostPrice());
             product.setSellingPrice(productDetails.getSellingPrice());

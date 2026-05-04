@@ -18,8 +18,9 @@ public class Product {
     @Column(name = "description")
     private String description;
 
-    @Column(name = "category", length = 100)
-    private String category;
+    @ManyToOne
+    @JoinColumn(name = "category", referencedColumnName = "category_name")
+    private ProductCategory category;
 
     @Column(name = "unit", length = 20)
     private String unit = "meter";
@@ -73,11 +74,11 @@ public class Product {
         this.description = description;
     }
 
-    public String getCategory() {
+    public ProductCategory getCategory() {
         return category;
     }
 
-    public void setCategory(String category) {
+    public void setCategory(ProductCategory category) {
         this.category = category;
     }
 
