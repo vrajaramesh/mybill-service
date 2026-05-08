@@ -2,6 +2,7 @@ package com.example.mybill.service;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
 @Table(name = "purchase_items")
@@ -14,6 +15,7 @@ public class PurchaseItem {
 
     @ManyToOne
     @JoinColumn(name = "purchase_id", nullable = false)
+    @JsonIgnore
     private Purchase purchase;
 
     @ManyToOne
@@ -28,6 +30,12 @@ public class PurchaseItem {
 
     @Column(name = "total_price", precision = 12, scale = 2, insertable = false, updatable = false)
     private BigDecimal totalPrice;
+
+    @Column(name = "gst", precision = 10, scale = 2)
+    private BigDecimal gst;
+
+    @Column(name = "final_price", precision = 12, scale = 2)
+    private BigDecimal finalPrice;
 
     // Constructors
     public PurchaseItem() {}
@@ -79,5 +87,21 @@ public class PurchaseItem {
 
     public void setTotalPrice(BigDecimal totalPrice) {
         this.totalPrice = totalPrice;
+    }
+
+    public BigDecimal getGst() {
+        return gst;
+    }
+
+    public void setGst(BigDecimal gst) {
+        this.gst = gst;
+    }
+
+    public BigDecimal getFinalPrice() {
+        return finalPrice;
+    }
+
+    public void setFinalPrice(BigDecimal finalPrice) {
+        this.finalPrice = finalPrice;
     }
 }

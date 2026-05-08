@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -37,32 +38,20 @@ public class PurchaseService {
 
     @Transactional
     public Purchase createPurchase(Purchase purchase) {
-        // Set timestamps
         purchase.setCreatedAt(LocalDateTime.now());
 
-        // Calculate total amount from items if not provided
-        if (purchase.getTotalAmount() == null && purchase.getPurchaseItems() != null) {
-            BigDecimal total = purchase.getPurchaseItems().stream()
-                .map(item -> item.getTotalPrice())
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-            purchase.setTotalAmount(total);
-        }
-
-        // Update payment status based on paid amount
-        updatePaymentStatus(purchase);
-
-        // Save purchase first
-        Purchase savedPurchase = purchaseRepository.save(purchase);
-
-        // Save purchase items
         if (purchase.getPurchaseItems() != null) {
             for (PurchaseItem item : purchase.getPurchaseItems()) {
-                item.setPurchase(savedPurchase);
-                purchaseItemRepository.save(item);
+                item.setPurchase(purchase);
+                item.setTotalPrice(null);
+                calculateItemFinalPrice(item);
             }
         }
 
-        return savedPurchase;
+        calculatePurchaseTotals(purchase);
+        updatePaymentStatus(purchase);
+
+        return purchaseRepository.save(purchase);
     }
 
     @Transactional
@@ -84,23 +73,20 @@ public class PurchaseService {
 
             // Handle purchase items update
             if (purchaseDetails.getPurchaseItems() != null) {
-                // Remove existing items
-                purchaseItemRepository.deleteByPurchase_PurchaseId(id);
+                purchase.getPurchaseItems().clear();
 
-                // Add new items
                 for (PurchaseItem item : purchaseDetails.getPurchaseItems()) {
                     item.setPurchase(purchase);
-                    purchaseItemRepository.save(item);
+                    item.setTotalPrice(null);
+                    calculateItemFinalPrice(item);
+                    purchase.getPurchaseItems().add(item);
                 }
 
-                // Recalculate total amount from items
-                BigDecimal total = purchaseDetails.getPurchaseItems().stream()
-                    .map(item -> item.getQuantity().multiply(item.getUnitPrice()))
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-                purchase.setTotalAmount(total);
+                calculatePurchaseTotals(purchase);
             } else if (purchaseDetails.getTotalAmount() != null) {
-                // Use provided total amount if no items
                 purchase.setTotalAmount(purchaseDetails.getTotalAmount());
+                purchase.setGst(purchaseDetails.getGst());
+                purchase.setFinalAmount(purchaseDetails.getFinalAmount());
             }
 
             // Update payment status
@@ -148,17 +134,47 @@ public class PurchaseService {
         return null;
     }
 
+    private void calculateItemFinalPrice(PurchaseItem item) {
+        BigDecimal gstRate = item.getGst() != null ? item.getGst() : new BigDecimal("5");
+        BigDecimal basePrice = item.getQuantity().multiply(item.getUnitPrice());
+        BigDecimal gstAmount = basePrice.multiply(gstRate).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+        item.setFinalPrice(basePrice.add(gstAmount).setScale(2, RoundingMode.HALF_UP));
+        if (item.getGst() == null) {
+            item.setGst(gstRate);
+        }
+    }
+
+    private void calculatePurchaseTotals(Purchase purchase) {
+        if (purchase.getPurchaseItems() == null || purchase.getPurchaseItems().isEmpty()) {
+            return;
+        }
+        BigDecimal baseTotal = BigDecimal.ZERO;
+        BigDecimal gstTotal = BigDecimal.ZERO;
+        for (PurchaseItem item : purchase.getPurchaseItems()) {
+            BigDecimal itemBase = item.getQuantity().multiply(item.getUnitPrice());
+            BigDecimal itemGst = item.getGst() != null ? item.getGst() : new BigDecimal("5");
+            BigDecimal itemGstAmt = itemBase.multiply(itemGst).divide(new BigDecimal("100"), 2, RoundingMode.HALF_UP);
+            baseTotal = baseTotal.add(itemBase);
+            gstTotal = gstTotal.add(itemGstAmt);
+        }
+        purchase.setTotalAmount(baseTotal.setScale(2, RoundingMode.HALF_UP));
+        purchase.setGst(gstTotal.setScale(2, RoundingMode.HALF_UP));
+        purchase.setFinalAmount(baseTotal.add(gstTotal).setScale(2, RoundingMode.HALF_UP));
+    }
+
     private void updatePaymentStatus(Purchase purchase) {
         if (purchase.getPaidAmount() == null) {
             purchase.setPaidAmount(BigDecimal.ZERO);
         }
 
-        if (purchase.getTotalAmount() == null) {
+        BigDecimal invoiceTotal = purchase.getFinalAmount() != null
+            ? purchase.getFinalAmount() : purchase.getTotalAmount();
+        if (invoiceTotal == null) {
             purchase.setPaymentStatus("PENDING");
             return;
         }
 
-        int comparison = purchase.getPaidAmount().compareTo(purchase.getTotalAmount());
+        int comparison = purchase.getPaidAmount().compareTo(invoiceTotal);
         if (comparison == 0) {
             purchase.setPaymentStatus("PAID");
         } else if (comparison > 0) {

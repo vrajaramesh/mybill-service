@@ -3,6 +3,7 @@ package com.example.mybill.service;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 @Entity
 @Table(name = "purchase_payments")
@@ -15,6 +16,7 @@ public class PurchasePayment {
 
     @ManyToOne
     @JoinColumn(name = "purchase_id", nullable = false)
+    @JsonIgnore
     private Purchase purchase;
 
     @Column(name = "payment_date", nullable = false)

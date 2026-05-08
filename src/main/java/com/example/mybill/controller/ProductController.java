@@ -4,7 +4,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -17,6 +19,9 @@ public class ProductController {
 
     @Autowired
     private ProductCategoryService productCategoryService;
+
+    @Autowired
+    private ProductImageRepository productImageRepository;
 
     @GetMapping
     public List<Product> getAllProducts() {
@@ -57,5 +62,33 @@ public class ProductController {
     @GetMapping("/categories")
     public List<ProductCategory> getProductCategories() {
         return productCategoryService.getAllOnlineCategories();
+    }
+
+    @GetMapping("/{id}/images")
+    public ResponseEntity<List<ProductImage>> getProductImages(@PathVariable Integer id) {
+        return ResponseEntity.ok(productImageRepository.findByProductProductIdOrderByCreatedAtAsc(id));
+    }
+
+    @PostMapping("/{id}/images")
+    public ResponseEntity<ProductImage> addProductImage(
+            @PathVariable Integer id,
+            @RequestBody Map<String, String> body) {
+        Optional<Product> product = productService.getProductById(id);
+        if (product.isEmpty()) return ResponseEntity.notFound().build();
+
+        ProductImage img = new ProductImage();
+        img.setProduct(product.get());
+        img.setImageUrl(body.get("imageUrl"));
+        img.setPublicId(body.get("publicId"));
+        img.setCreatedAt(LocalDateTime.now());
+        return ResponseEntity.ok(productImageRepository.save(img));
+    }
+
+    @DeleteMapping("/{id}/images/{imageId}")
+    public ResponseEntity<Void> deleteProductImage(
+            @PathVariable Integer id,
+            @PathVariable Integer imageId) {
+        productImageRepository.deleteById(imageId);
+        return ResponseEntity.noContent().build();
     }
 }

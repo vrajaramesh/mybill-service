@@ -28,6 +28,12 @@ public class Purchase {
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
 
+    @Column(name = "gst", precision = 12, scale = 2)
+    private BigDecimal gst;
+
+    @Column(name = "final_price", precision = 12, scale = 2)
+    private BigDecimal finalAmount;
+
     @Column(name = "paid_amount", precision = 12, scale = 2)
     private BigDecimal paidAmount = BigDecimal.ZERO;
 
@@ -43,10 +49,10 @@ public class Purchase {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
-    @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<PurchaseItem> purchaseItems;
 
-    @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "purchase", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     private List<PurchasePayment> purchasePayments;
 
     // Constructors
@@ -91,6 +97,22 @@ public class Purchase {
 
     public void setTotalAmount(BigDecimal totalAmount) {
         this.totalAmount = totalAmount;
+    }
+
+    public BigDecimal getGst() {
+        return gst;
+    }
+
+    public void setGst(BigDecimal gst) {
+        this.gst = gst;
+    }
+
+    public BigDecimal getFinalAmount() {
+        return finalAmount;
+    }
+
+    public void setFinalAmount(BigDecimal finalAmount) {
+        this.finalAmount = finalAmount;
     }
 
     public BigDecimal getPaidAmount() {
