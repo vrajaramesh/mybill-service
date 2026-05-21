@@ -27,6 +27,12 @@ public class ProductImage {
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
+    @Column(name = "image_type", length = 20)
+    private String imageType = "user";
+
+    @Column(name = "media_type", length = 10)
+    private String mediaType = "image";
+
     public ProductImage() {}
 
     public Integer getImageId() { return imageId; }
@@ -43,4 +49,10 @@ public class ProductImage {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    public String getImageType() { return imageType; }
+    public void setImageType(String imageType) { this.imageType = imageType; }
+
+    public String getMediaType() { return mediaType; }
+    public void setMediaType(String mediaType) { this.mediaType = mediaType; }
 }

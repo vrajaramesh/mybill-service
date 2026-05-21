@@ -11,6 +11,10 @@ public class ProductCategoryService {
     @Autowired
     private ProductCategoryRepository productCategoryRepository;
 
+    public List<ProductCategory> getAllCategories() {
+        return productCategoryRepository.findAll();
+    }
+
     public List<ProductCategory> getAllOnlineCategories() {
         return productCategoryRepository.findByIsOnlineTrue();
     }

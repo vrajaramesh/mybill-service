@@ -40,6 +40,16 @@ public class Product {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
+    @Column(name = "is_online")
+    private Boolean isOnline = true;
+
+    @Column(name = "tags")
+    private String tags;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "sub_category_id")
+    private ProductSubCategory subCategory;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -129,6 +139,21 @@ public class Product {
     public void setIsActive(Boolean isActive) {
         this.isActive = isActive;
     }
+
+    public Boolean getIsOnline() { return isOnline; }
+    public void setIsOnline(Boolean isOnline) { this.isOnline = isOnline; }
+
+    public ProductSubCategory getSubCategory() { return subCategory; }
+    public void setSubCategory(ProductSubCategory subCategory) { this.subCategory = subCategory; }
+
+    public String getTags() { return tags; }
+    public void setTags(String tags) { this.tags = tags; }
+
+    @Column(name = "suitable_for")
+    private String suitableFor;
+
+    public String getSuitableFor() { return suitableFor; }
+    public void setSuitableFor(String suitableFor) { this.suitableFor = suitableFor; }
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
