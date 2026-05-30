@@ -155,6 +155,12 @@ public class Product {
     public String getSuitableFor() { return suitableFor; }
     public void setSuitableFor(String suitableFor) { this.suitableFor = suitableFor; }
 
+    @Column(name = "sizes")
+    private String sizes;
+
+    public String getSizes() { return sizes; }
+    public void setSizes(String sizes) { this.sizes = sizes; }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }

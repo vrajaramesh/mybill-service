@@ -19,6 +19,28 @@ public class ProductController {
     @Autowired private ProductSubCategoryRepository subCategoryRepository;
     @Autowired private ProductImageRepository productImageRepository;
     @Autowired private ProductVectorService productVectorService;
+    @Autowired private GeminiService geminiService;
+    @Autowired private GroqChatService groqChatService;
+
+    // ── AI Description (Groq llama-3.2-11b-vision-preview) ───────────────
+
+    @PostMapping("/generate-description")
+    public ResponseEntity<?> generateDescription(@RequestBody Map<String, String> req) {
+        try {
+            String description = groqChatService.generateFabricDescription(
+                req.get("productName"),
+                req.get("category"),
+                req.get("suitableFor"),
+                req.get("tags"),
+                req.get("imageUrl")
+            );
+            return ResponseEntity.ok(Map.of("description", description));
+        } catch (Exception e) {
+            System.err.println("[DESC] Generation failed: " + e.getMessage());
+            return ResponseEntity.internalServerError()
+                .body(Map.of("error", e.getMessage()));
+        }
+    }
 
     // ── Products ──────────────────────────────────────────────────────────
 
@@ -162,5 +184,27 @@ public class ProductController {
         if (!subCategoryRepository.existsById(id)) return ResponseEntity.notFound().build();
         subCategoryRepository.deleteById(id);
         return ResponseEntity.noContent().build();
+    }
+
+    // ── Bulk re-embed all products (call once after switching embedding model) ──
+
+    @PostMapping("/reembed-all")
+    public ResponseEntity<?> reembedAll() {
+        List<Product> all = productService.getAllProducts();
+        int triggered = 0;
+        for (Product p : all) {
+            try {
+                String imageUrl = productImageRepository
+                    .findByProductProductIdOrderByCreatedAtAsc(p.getProductId()).stream()
+                    .findFirst()
+                    .map(img -> img.getImageUrl())
+                    .orElse(null);
+                productVectorService.triggerEmbeddingAsync(p.getProductId(), imageUrl);
+                triggered++;
+            } catch (Exception e) {
+                System.err.println("[REEMBED] Skipped product " + p.getProductId() + ": " + e.getMessage());
+            }
+        }
+        return ResponseEntity.ok(Map.of("triggered", triggered, "total", all.size()));
     }
 }

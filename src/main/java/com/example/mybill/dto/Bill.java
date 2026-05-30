@@ -43,6 +43,12 @@ public class Bill {
     @Column(name = "notes")
     private String notes;
 
+    @Column(name = "sales_person_id")
+    private Integer salesPersonId;
+
+    @Column(name = "sales_person_name", length = 100)
+    private String salesPersonName;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -86,4 +92,10 @@ public class Bill {
 
     public List<BillItem> getBillItems() { return billItems; }
     public void setBillItems(List<BillItem> billItems) { this.billItems = billItems; }
+
+    public Integer getSalesPersonId() { return salesPersonId; }
+    public void setSalesPersonId(Integer salesPersonId) { this.salesPersonId = salesPersonId; }
+
+    public String getSalesPersonName() { return salesPersonName; }
+    public void setSalesPersonName(String salesPersonName) { this.salesPersonName = salesPersonName; }
 }

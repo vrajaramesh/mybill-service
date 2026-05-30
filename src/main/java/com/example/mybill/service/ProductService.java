@@ -77,6 +77,7 @@ public class ProductService {
             product.setIsOnline(productDetails.getIsOnline() != null ? productDetails.getIsOnline() : true);
             product.setSuitableFor(productDetails.getSuitableFor());
             product.setTags(productDetails.getTags());
+            product.setSizes(productDetails.getSizes());
             product.setUpdatedAt(LocalDateTime.now());
             return productRepository.save(product);
         }
