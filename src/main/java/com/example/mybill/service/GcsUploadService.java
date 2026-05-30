@@ -36,7 +36,7 @@ public class GcsUploadService implements ImageUploadService {
             byte[] bytes = Base64.getDecoder().decode(base64);
             BlobId blobId = BlobId.of(bucketName, objectName);
             BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType(mime).build();
-            storage.create(blobInfo, bytes, Storage.BlobTargetOption.predefinedAcl(Storage.PredefinedAcl.PUBLIC_READ));
+            storage.create(blobInfo, bytes);
 
             return "https://storage.googleapis.com/" + bucketName + "/" + objectName;
         } catch (Exception e) {
@@ -63,7 +63,7 @@ public class GcsUploadService implements ImageUploadService {
 
             BlobId blobId = BlobId.of(bucketName, objectName);
             BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType(contentType).build();
-            storage.create(blobInfo, response.body(), Storage.BlobTargetOption.predefinedAcl(Storage.PredefinedAcl.PUBLIC_READ));
+            storage.create(blobInfo, response.body());
 
             return "https://storage.googleapis.com/" + bucketName + "/" + objectName;
         } catch (RuntimeException e) {
