@@ -1,0 +1,10 @@
+target/
+*.class
+*.jar
+*.war
+.idea/
+*.iml
+.env
+src/main/resources/application-local.properties
+gcp-wif-bind.sh
+sa-key.json
