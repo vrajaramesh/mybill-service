@@ -45,6 +45,21 @@ public class GcsUploadService implements ImageUploadService {
     }
 
     @Override
+    public String uploadFile(byte[] bytes, String mimeType) {
+        try {
+            String mime = mimeType != null ? mimeType : "image/jpeg";
+            String ext = mime.contains("png") ? "png" : "jpg";
+            String objectName = "product-uploads/" + UUID.randomUUID() + "." + ext;
+            BlobId blobId = BlobId.of(bucketName, objectName);
+            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType(mime).build();
+            storage.create(blobInfo, bytes);
+            return "https://storage.googleapis.com/" + bucketName + "/" + objectName;
+        } catch (Exception e) {
+            throw new RuntimeException("GCS file upload error: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public String uploadFromUrl(String imageUrl) {
         try {
             HttpRequest request = HttpRequest.newBuilder()

@@ -99,6 +99,19 @@ public class CloudinaryUploadService implements ImageUploadService {
     }
 
     @Override
+    public String uploadFile(byte[] bytes, String mimeType) {
+        try {
+            String mime = mimeType != null ? mimeType : "image/jpeg";
+            String ext  = mime.contains("png") ? "png" : "jpg";
+            return uploadBytes(bytes, mime, ext, "product-uploads");
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Cloudinary file upload error: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public String uploadFromUrl(String imageUrl) {
         try {
             String body = "file=" + URLEncoder.encode(imageUrl, StandardCharsets.UTF_8) +
