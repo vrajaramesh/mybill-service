@@ -42,6 +42,32 @@ public class FashionCLIPService {
         return call("/embed/image-base64", body);
     }
 
+    /**
+     * Zero-shot garment classification using the shared CLIP embedding space.
+     * Returns one of: Saree, Kurti, Salwar, Blouse, Frock, Lehenga, Dupatta, Fabric, Accessories.
+     * Falls back to "Fabric" if the service is unreachable or the call fails.
+     */
+    public String classifyGarmentType(String imageUrl) {
+        ObjectNode body = json.createObjectNode();
+        body.put("url", imageUrl);
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/classify/garment"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
+                .timeout(Duration.ofSeconds(30))
+                .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200)
+                throw new RuntimeException("FashionCLIP classify error " + resp.statusCode() + ": " + resp.body());
+            return json.readTree(resp.body()).path("garmentType").asText("Fabric");
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("FashionCLIP classify failed: " + e.getMessage(), e);
+        }
+    }
+
     public boolean isAvailable() {
         try {
             HttpRequest req = HttpRequest.newBuilder()

@@ -78,8 +78,8 @@ public class ProductPhotoPromptBuilder {
                 "matching bottom wear, casual daytime café setting, natural warm sunlight, lifestyle fashion photo";
             case "dress" -> base + "Indian woman model wearing the fabric as an elegant midi dress, " +
                 "clean studio with gradient white background, professional fashion photography lighting, full-body shot";
-            case "frock" -> base + "Young Indian woman wearing the fabric as a flared frock, " +
-                "bright outdoor garden setting, soft natural light, fashion lifestyle photography";
+            case "frock" -> base + "5-year-old cute Indian girl wearing the fabric as a flared frock, " +
+                "bright outdoor garden setting, cheerful expression, playful natural pose, soft natural light, kids fashion photography";
             case "blouse" -> base + "Indian woman model wearing the fabric as a saree blouse paired with a " +
                 "contrasting saree, close-up portrait showing the blouse detailing, soft studio lighting";
             case "lehenga" -> base + "Indian bride or model wearing the fabric as a lehenga skirt with blouse " +

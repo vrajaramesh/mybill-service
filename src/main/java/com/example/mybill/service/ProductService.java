@@ -1,5 +1,7 @@
 package com.example.mybill.service;
 
+import com.example.mybill.multitenancy.TenantContext;
+import com.example.mybill.repository.FirmRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,12 @@ public class ProductService {
 
     @Autowired
     private ProductSubCategoryRepository productSubCategoryRepository;
+
+    @Autowired
+    private HermesAgentService hermesAgentService;
+
+    @Autowired
+    private FirmRepository firmRepository;
 
     public List<Product> getAllProducts() {
         return productRepository.findAllWithSubCategories();
@@ -48,7 +56,9 @@ public class ProductService {
         }
         product.setProductId(newId);
 
-        return productRepository.save(product);
+        Product saved = productRepository.save(product);
+        triggerHermesAsync(saved.getProductId());
+        return saved;
     }
 
     @Transactional
@@ -79,7 +89,9 @@ public class ProductService {
             product.setTags(productDetails.getTags());
             product.setSizes(productDetails.getSizes());
             product.setUpdatedAt(LocalDateTime.now());
-            return productRepository.save(product);
+            Product saved = productRepository.save(product);
+            triggerHermesAsync(saved.getProductId());
+            return saved;
         }
         return null;
     }
@@ -91,5 +103,20 @@ public class ProductService {
     private ProductSubCategory resolveSubCategory(ProductSubCategory incoming) {
         if (incoming == null || incoming.getId() == null) return null;
         return productSubCategoryRepository.findById(incoming.getId()).orElse(null);
+    }
+
+    private void triggerHermesAsync(Integer productId) {
+        try {
+            String schema = TenantContext.getCurrentTenant();
+            if (schema == null) return;
+            String firmName = firmRepository.findAll().stream()
+                .filter(f -> schema.equals(f.getSchemaName()))
+                .findFirst()
+                .map(f -> f.getFirmName())
+                .orElse(schema);
+            hermesAgentService.generateContentAsync(productId, schema, firmName);
+        } catch (Exception e) {
+            System.err.println("[Hermes] Async trigger failed for product " + productId + ": " + e.getMessage());
+        }
     }
 }

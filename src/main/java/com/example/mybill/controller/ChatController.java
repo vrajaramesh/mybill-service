@@ -19,6 +19,7 @@ public class ChatController {
     @Autowired private FirmRepository firmRepository;
     @Autowired private ChatService chatService;
     @Autowired private ProductVectorService productVectorService;
+    @Autowired private ImageSearchService imageSearchService;
     @Autowired private DataSource dataSource;
 
     @PostMapping("/{firmCode}/chat")
@@ -69,6 +70,30 @@ public class ChatController {
             return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
         }
         return ResponseEntity.ok(Map.of());
+    }
+
+    /**
+     * Public endpoint: search generated fashion photos by natural language.
+     * Used by ecom chatbot and admin retrieval queries.
+     * e.g. GET /api/public/srisa/image-search?q=yellow+saree+wedding&limit=10
+     */
+    @GetMapping("/{firmCode}/image-search")
+    public ResponseEntity<?> imageSearch(
+            @PathVariable String firmCode,
+            @RequestParam String q,
+            @RequestParam(defaultValue = "12") int limit) {
+
+        Optional<Firm> firmOpt = firmRepository.findByFirmCode(firmCode.toLowerCase().trim());
+        if (firmOpt.isEmpty() || !Boolean.TRUE.equals(firmOpt.get().getIsActive()))
+            return ResponseEntity.notFound().build();
+
+        String schema = firmOpt.get().getSchemaName();
+        try {
+            List<ImageSearchResult> results = imageSearchService.search(q, schema, limit);
+            return ResponseEntity.ok(results);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
     }
 
     /** Trigger FashionCLIP re-embedding for every active product via JDBC (schema-safe). */

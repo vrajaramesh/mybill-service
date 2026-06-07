@@ -31,7 +31,7 @@ public class GcsUploadService implements ImageUploadService {
         try {
             String mime = mimeType != null ? mimeType : "image/jpeg";
             String ext = mime.contains("png") ? "png" : "jpg";
-            String objectName = "chat-images/" + UUID.randomUUID() + "." + ext;
+            String objectName = "ai-generated/" + UUID.randomUUID() + "." + ext;
 
             byte[] bytes = Base64.getDecoder().decode(base64);
             BlobId blobId = BlobId.of(bucketName, objectName);

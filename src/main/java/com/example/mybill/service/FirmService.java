@@ -223,21 +223,25 @@ public class FirmService {
         stmt.execute("""
             CREATE TABLE IF NOT EXISTS product_embeddings (
                 product_id  INTEGER PRIMARY KEY REFERENCES products(product_id) ON DELETE CASCADE,
-                embedding   VECTOR(512),
+                embedding   VECTOR(768),
                 meta_text   TEXT,
                 updated_at  TIMESTAMP DEFAULT NOW()
             )""");
-        // Migrate any prior dimension (3072 Gemini or 1536 OpenAI) → 512 (FashionCLIP)
+        // Migrate any prior dimension (3072 Gemini, 1536 OpenAI, or 512 old FashionCLIP) → 768 (FashionSigLIP)
         stmt.execute("""
             DO $mig$
             DECLARE col_mod integer;
             BEGIN
                 SELECT atttypmod INTO col_mod
-                FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
-                WHERE c.relname = 'product_embeddings' AND a.attname = 'embedding';
-                IF col_mod IS NOT NULL AND col_mod <> 512 THEN
+                FROM pg_attribute a
+                JOIN pg_class c ON c.oid = a.attrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relname = 'product_embeddings'
+                  AND a.attname  = 'embedding'
+                  AND n.nspname  = current_schema();
+                IF col_mod IS NOT NULL AND col_mod <> 768 THEN
                     TRUNCATE product_embeddings;
-                    ALTER TABLE product_embeddings ALTER COLUMN embedding TYPE vector(512);
+                    ALTER TABLE product_embeddings ALTER COLUMN embedding TYPE vector(768);
                 END IF;
             END $mig$;
             """);

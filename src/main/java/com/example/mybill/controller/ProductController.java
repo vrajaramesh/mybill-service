@@ -19,6 +19,7 @@ public class ProductController {
     @Autowired private ProductSubCategoryRepository subCategoryRepository;
     @Autowired private ProductImageRepository productImageRepository;
     @Autowired private ProductVectorService productVectorService;
+    @Autowired private ImageEmbeddingService imageEmbeddingService;
     @Autowired private GeminiService geminiService;
     @Autowired private GroqChatService groqChatService;
 
@@ -80,7 +81,23 @@ public class ProductController {
 
     @GetMapping("/{id}/images")
     public ResponseEntity<List<ProductImage>> getProductImages(@PathVariable Integer id) {
-        return ResponseEntity.ok(productImageRepository.findByProductProductIdOrderByCreatedAtAsc(id));
+        return ResponseEntity.ok(productImageRepository.findByProductProductIdOrderBySortOrderAscCreatedAtAsc(id));
+    }
+
+    @PutMapping("/{id}/images/reorder")
+    public ResponseEntity<Void> reorderProductImages(
+            @PathVariable Integer id, @RequestBody List<Map<String, Integer>> order) {
+        for (Map<String, Integer> item : order) {
+            Integer imageId = item.get("imageId");
+            Integer sortOrder = item.get("sortOrder");
+            if (imageId != null && sortOrder != null) {
+                productImageRepository.findById(imageId).ifPresent(img -> {
+                    img.setSortOrder(sortOrder);
+                    productImageRepository.save(img);
+                });
+            }
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/{id}/images")
@@ -96,7 +113,15 @@ public class ProductController {
         img.setMediaType(body.getOrDefault("mediaType", "image"));
         img.setCreatedAt(LocalDateTime.now());
         ProductImage saved = productImageRepository.save(img);
-        productVectorService.triggerEmbeddingAsync(id, body.get("imageUrl"));
+        String imageUrl = body.get("imageUrl");
+        productVectorService.triggerEmbeddingAsync(id, imageUrl);
+        // Only classify+embed images (not videos) in product_image_embeddings
+        if ("image".equals(img.getMediaType()) && imageUrl != null && !imageUrl.isBlank()) {
+            String schema = com.example.mybill.multitenancy.TenantContext.getCurrentTenant();
+            if (schema != null) {
+                imageEmbeddingService.embedUploadedImageAsync(id, imageUrl, schema);
+            }
+        }
         return ResponseEntity.ok(saved);
     }
 

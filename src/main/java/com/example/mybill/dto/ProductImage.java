@@ -33,6 +33,9 @@ public class ProductImage {
     @Column(name = "media_type", length = 10)
     private String mediaType = "image";
 
+    @Column(name = "sort_order")
+    private Integer sortOrder = 0;
+
     public ProductImage() {}
 
     public Integer getImageId() { return imageId; }
@@ -55,4 +58,7 @@ public class ProductImage {
 
     public String getMediaType() { return mediaType; }
     public void setMediaType(String mediaType) { this.mediaType = mediaType; }
+
+    public Integer getSortOrder() { return sortOrder; }
+    public void setSortOrder(Integer sortOrder) { this.sortOrder = sortOrder; }
 }

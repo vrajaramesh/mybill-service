@@ -164,7 +164,13 @@ public class PublicController {
             "LEFT JOIN \"" + s + "\".product_category pc ON pc.category_name = p.category " +
             subCatJoin +
             " WHERE p.is_active = TRUE " +
-            "  AND (pc.is_online = TRUE OR p.category IS NULL) "
+            "  AND (pc.is_online = TRUE OR p.category IS NULL) " +
+            "  AND p.stock_quantity > 0 " +
+            "  AND EXISTS (" +
+            "        SELECT 1 FROM \"" + s + "\".product_images pi2 " +
+            "        WHERE pi2.product_id = p.product_id " +
+            "          AND (pi2.media_type IS NULL OR pi2.media_type = 'image'))" +
+            " "
         );
         final boolean useDirectSubCat = hasSubCatCol && hasSubCategory;
 
