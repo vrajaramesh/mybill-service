@@ -20,13 +20,13 @@ import java.util.UUID;
 @RequestMapping("/api/upload")
 public class FileUploadController {
 
-    @Value("${cloudinary.cloud-name}")
+    @Value("${cloudinary.cloud-name:}")
     private String cloudName;
 
-    @Value("${cloudinary.upload-preset}")
+    @Value("${cloudinary.upload-preset:}")
     private String uploadPreset;
 
-    @Value("${cloudinary.api.url}")
+    @Value("${cloudinary.api.url:https://api.cloudinary.com/v1_1}")
     private String cloudinaryApiUrl;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
