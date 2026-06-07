@@ -180,6 +180,22 @@ public class SchemaColumnMigrationRunner implements ApplicationRunner {
             } catch (Exception e) {
                 System.err.println("[Migration] Could not create firm_settings for schema " + s + ": " + e.getMessage());
             }
+            // product_images: new columns for ecom media management
+            try {
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".product_images ADD COLUMN IF NOT EXISTS image_type  VARCHAR(20)");
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".product_images ADD COLUMN IF NOT EXISTS media_type  VARCHAR(10) DEFAULT 'image'");
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".product_images ADD COLUMN IF NOT EXISTS sort_order  INTEGER DEFAULT 0");
+                jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_product_images_sort ON \"" + s + "\".product_images (product_id, sort_order)");
+            } catch (Exception e) {
+                System.err.println("[Migration] product_images ecom columns for schema " + s + ": " + e.getMessage());
+            }
+            // products: new ecom columns
+            try {
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".products ADD COLUMN IF NOT EXISTS suitable_for VARCHAR(500)");
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".products ADD COLUMN IF NOT EXISTS tags         VARCHAR(500)");
+            } catch (Exception e) {
+                System.err.println("[Migration] products ecom columns for schema " + s + ": " + e.getMessage());
+            }
         }
 
         // Ensure admin_firm_access table exists (idempotent)
