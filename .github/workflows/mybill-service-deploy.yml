@@ -54,7 +54,7 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE }}:${{ github.sha }}
           env_vars: |
-            SPRING_DATASOURCE_URL=jdbc:postgresql://34.16.82.180:5432/postgres?sslmode=require
+            CLOUD_SQL_INSTANCE=${{ secrets.CLOUD_SQL_INSTANCE }}
             SPRING_DATASOURCE_USERNAME=postgres
             SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
@@ -71,3 +71,4 @@ jobs:
             --port=8080
             --timeout=300
             --allow-unauthenticated
+            --add-cloudsql-instances=${{ secrets.CLOUD_SQL_INSTANCE }}
