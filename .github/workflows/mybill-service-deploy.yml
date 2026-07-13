@@ -71,3 +71,4 @@ jobs:
             --port=8080
             --timeout=300
             --allow-unauthenticated
+            --add-cloudsql-instances=project-0708fb26-e204-4400-ae9:us-central1:mybillnew
