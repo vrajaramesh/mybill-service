@@ -118,8 +118,8 @@ public class GroqChatService {
     private static final String VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
     public String generateFabricDescription(String productName, String category,
-                                             String suitableFor, String tags,
-                                             String imageUrl) {
+                                               String suitableFor, String tags,
+                                               String imageUrl, String garmentType) {
         try {
             ObjectNode body = objectMapper.createObjectNode();
             body.put("model", VISION_MODEL);
@@ -151,7 +151,7 @@ public class GroqChatService {
             }
 
             content.addObject().put("type", "text").put("text",
-                buildDescriptionPrompt(productName, category, suitableFor, tags));
+                buildDescriptionPrompt(productName, category, suitableFor, tags, garmentType));
 
             HttpRequest req = HttpRequest.newBuilder()
                 .uri(URI.create(groqUrl))
@@ -177,7 +177,7 @@ public class GroqChatService {
     }
 
     private String buildDescriptionPrompt(String productName, String category,
-                                           String suitableFor, String tags) {
+                                           String suitableFor, String tags, String garmentType) {
         StringBuilder sb = new StringBuilder();
         sb.append("Look at the fabric image and write ONE sentence description for a product catalog.\n\n");
         sb.append("Format: [COLOR] [FABRIC TYPE] with [PATTERN/DESIGN], ideal for [USE CASES].\n\n");
@@ -188,6 +188,12 @@ public class GroqChatService {
         sb.append("- Use cases: list garments from 'Suitable For' below\n");
         sb.append("- Output ONLY the one sentence — no extra text, no explanation\n");
         sb.append("- NEVER use: timeless, elegant, premium, luxurious, effortless, sophisticated, versatile\n\n");
+
+        if (garmentType != null && !garmentType.isBlank()) {
+            sb.append("Detected Garment Type: ").append(garmentType).append("\n");
+            sb.append("Use this garment type to inform your understanding of the fabric's use case.\n\n");
+        }
+
         sb.append("Product info:\n");
         sb.append("Name: ").append(productName != null ? productName : "").append("\n");
         if (category != null && !category.isBlank())
