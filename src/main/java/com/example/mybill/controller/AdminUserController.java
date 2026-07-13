@@ -201,6 +201,110 @@ public class AdminUserController {
         }
     }
 
+    /** Create an ECOM user in a firm (ecom-coverage screen only, no delete). firmCode in body. */
+    @PostMapping("/users/ecom")
+    public ResponseEntity<?> createEcomUser(@RequestBody Map<String, Object> body, HttpServletRequest req) {
+        try {
+            Claims c = claims(req);
+            String firmCode = (String) body.get("firmCode");
+            if (firmCode == null) return ResponseEntity.badRequest().body(Map.of("error", "firmCode required"));
+
+            Optional<Firm> firmOpt = firmRepository.findByFirmCode(firmCode.toLowerCase().trim());
+            if (firmOpt.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Firm not found"));
+            Firm firm = firmOpt.get();
+
+            if (isAdmin(c) && !adminHasAccess(c.getSubject(), firm.getFirmId()))
+                return ResponseEntity.status(403).body(Map.of("error", "You do not have access to firm: " + firmCode));
+            if (!isSA(c) && !isAdmin(c)) return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+
+            String username = trim(body, "username");
+            String password = (String) body.get("password");
+            String fullName = trim(body, "fullName");
+            String email    = (String) body.get("email");
+            String phone    = (String) body.get("phone");
+
+            if (username == null || password == null)
+                return ResponseEntity.badRequest().body(Map.of("error", "username and password are required"));
+            if (password.length() < 6)
+                return ResponseEntity.badRequest().body(Map.of("error", "Password must be at least 6 characters"));
+
+            String schema = firm.getSchemaName();
+            String hash   = passwordEncoder.encode(password);
+
+            try (Connection conn = dataSource.getConnection()) {
+                conn.createStatement().execute("SET search_path TO \"" + schema + "\", public");
+                PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO app_users(username, password_hash, full_name, email, phone, role, is_active, created_at) " +
+                    "VALUES(?,?,?,?,?,'ECOM',TRUE,NOW()) RETURNING user_id, username, full_name, role, is_active");
+                ps.setString(1, username);
+                ps.setString(2, hash);
+                ps.setString(3, fullName);
+                ps.setString(4, email);
+                ps.setString(5, phone);
+                ResultSet rs = ps.executeQuery();
+                if (rs.next()) {
+                    return ResponseEntity.ok(Map.of(
+                        "userId",   rs.getInt("user_id"),
+                        "username", rs.getString("username"),
+                        "fullName", nullSafe(rs.getString("full_name")),
+                        "role",     rs.getString("role"),
+                        "firmCode", firmCode,
+                        "message",  "Ecom user created"
+                    ));
+                }
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Insert failed"));
+        } catch (Exception e) {
+            String msg = e.getMessage() != null && e.getMessage().contains("unique")
+                ? "Username already exists in this firm" : e.getMessage();
+            return ResponseEntity.badRequest().body(Map.of("error", msg));
+        }
+    }
+
+    /** List ECOM users for a firm. */
+    @GetMapping("/users/ecom")
+    public ResponseEntity<?> listEcomUsers(@RequestParam String firmCode, HttpServletRequest req) {
+        try {
+            Claims c = claims(req);
+            Optional<Firm> firmOpt = firmRepository.findByFirmCode(firmCode.toLowerCase().trim());
+            if (firmOpt.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Firm not found"));
+            Firm firm = firmOpt.get();
+            if (isAdmin(c) && !adminHasAccess(c.getSubject(), firm.getFirmId()))
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+            if (!isSA(c) && !isAdmin(c)) return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+
+            String schema = firm.getSchemaName();
+            List<Map<String, Object>> users = jdbcTemplate.queryForList(
+                "SELECT user_id, username, full_name, email, phone, is_active, created_at " +
+                "FROM \"" + schema + "\".app_users WHERE role='ECOM' ORDER BY created_at DESC");
+            return ResponseEntity.ok(users);
+        } catch (Exception e) { return ResponseEntity.status(500).body(Map.of("error", e.getMessage())); }
+    }
+
+    /** Toggle ECOM user active status. */
+    @PatchMapping("/users/ecom/{userId}/status")
+    public ResponseEntity<?> toggleEcomUserStatus(@PathVariable int userId,
+                                                   @RequestParam String firmCode,
+                                                   @RequestBody Map<String, Object> body,
+                                                   HttpServletRequest req) {
+        try {
+            Claims c = claims(req);
+            Optional<Firm> firmOpt = firmRepository.findByFirmCode(firmCode.toLowerCase().trim());
+            if (firmOpt.isEmpty()) return ResponseEntity.badRequest().body(Map.of("error", "Firm not found"));
+            Firm firm = firmOpt.get();
+            if (isAdmin(c) && !adminHasAccess(c.getSubject(), firm.getFirmId()))
+                return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+            if (!isSA(c) && !isAdmin(c)) return ResponseEntity.status(403).body(Map.of("error", "Access denied"));
+
+            boolean isActive = Boolean.TRUE.equals(body.get("isActive"));
+            String schema = firm.getSchemaName();
+            jdbcTemplate.update(
+                "UPDATE \"" + schema + "\".app_users SET is_active=? WHERE user_id=? AND role='ECOM'",
+                isActive, userId);
+            return ResponseEntity.ok(Map.of("message", "Status updated"));
+        } catch (Exception e) { return ResponseEntity.status(500).body(Map.of("error", e.getMessage())); }
+    }
+
     /** Update a SALES user. firmCode in query param. */
     @PutMapping("/users/sales/{userId}")
     public ResponseEntity<?> updateSalesUser(@PathVariable int userId,

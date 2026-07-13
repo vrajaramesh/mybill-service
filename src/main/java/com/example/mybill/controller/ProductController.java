@@ -1,5 +1,7 @@
 package com.example.mybill.service;
 
+import com.example.mybill.multitenancy.JwtUtil;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,22 +20,35 @@ public class ProductController {
     @Autowired private ProductCategoryRepository productCategoryRepository;
     @Autowired private ProductSubCategoryRepository subCategoryRepository;
     @Autowired private ProductImageRepository productImageRepository;
+    @Autowired private JwtUtil jwtUtil;
     @Autowired private ProductVectorService productVectorService;
     @Autowired private ImageEmbeddingService imageEmbeddingService;
     @Autowired private GeminiService geminiService;
     @Autowired private GroqChatService groqChatService;
+    @Autowired private FashionCLIPService fashionCLIPService;
 
     // ── AI Description (Groq llama-3.2-11b-vision-preview) ───────────────
 
     @PostMapping("/generate-description")
     public ResponseEntity<?> generateDescription(@RequestBody Map<String, String> req) {
         try {
+            String imageUrl = req.get("imageUrl");
+            String garmentType = "Fabric"; // Default
+            if (imageUrl != null && !imageUrl.isBlank()) {
+                try {
+                    garmentType = fashionCLIPService.classifyGarmentType(imageUrl);
+                } catch (Exception e) {
+                    System.err.println("[DESC] FashionCLIP classification failed, using default: " + e.getMessage());
+                }
+            }
+
             String description = groqChatService.generateFabricDescription(
                 req.get("productName"),
                 req.get("category"),
                 req.get("suitableFor"),
                 req.get("tags"),
-                req.get("imageUrl")
+                imageUrl,
+                garmentType
             );
             return ResponseEntity.ok(Map.of("description", description));
         } catch (Exception e) {
@@ -72,9 +87,19 @@ public class ProductController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteProduct(@PathVariable Integer id) {
+    public ResponseEntity<?> deleteProduct(@PathVariable Integer id, HttpServletRequest req) {
+        if (isEcom(req)) return ResponseEntity.status(403).body(Map.of("error", "ECOM role cannot delete products"));
         productService.deleteProduct(id);
         return ResponseEntity.noContent().build();
+    }
+
+    private boolean isEcom(HttpServletRequest req) {
+        try {
+            String h = req.getHeader("Authorization");
+            if (h == null || !h.startsWith("Bearer ")) return false;
+            String role = jwtUtil.extractClaims(h.substring(7)).get("role", String.class);
+            return "ECOM".equals(role);
+        } catch (Exception e) { return false; }
     }
 
     // ── Product Images ────────────────────────────────────────────────────
@@ -126,8 +151,9 @@ public class ProductController {
     }
 
     @DeleteMapping("/{id}/images/{imageId}")
-    public ResponseEntity<Void> deleteProductImage(
-            @PathVariable Integer id, @PathVariable Integer imageId) {
+    public ResponseEntity<?> deleteProductImage(
+            @PathVariable Integer id, @PathVariable Integer imageId, HttpServletRequest req) {
+        if (isEcom(req)) return ResponseEntity.status(403).body(Map.of("error", "ECOM role cannot delete images"));
         productImageRepository.deleteById(imageId);
         return ResponseEntity.noContent().build();
     }
