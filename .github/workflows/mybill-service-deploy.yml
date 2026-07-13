@@ -54,7 +54,7 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE }}:${{ github.sha }}
           env_vars: |
-            CLOUD_SQL_INSTANCE=${{ secrets.CLOUD_SQL_INSTANCE }}
+            CLOUD_SQL_INSTANCE=project-0708fb26-e204-4400-ae9:us-central1:mybillnew
             SPRING_DATASOURCE_USERNAME=postgres
             SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
@@ -71,4 +71,4 @@ jobs:
             --port=8080
             --timeout=300
             --allow-unauthenticated
-            --add-cloudsql-instances=${{ secrets.CLOUD_SQL_INSTANCE }}
+            --add-cloudsql-instances=project-0708fb26-e204-4400-ae9:us-central1:mybillnew
