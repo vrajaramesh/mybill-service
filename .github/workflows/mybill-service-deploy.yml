@@ -54,8 +54,7 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE }}:${{ github.sha }}
           env_vars: |
-            CLOUD_SQL_INSTANCE=project-0708fb26-e204-4400-ae9:us-central1:mybillnew
-            SPRING_DATASOURCE_URL=jdbc:postgresql://google/postgres?cloudSqlInstance=project-0708fb26-e204-4400-ae9:us-central1:mybillnew&socketFactory=com.google.cloud.sql.postgres.SocketFactory
+            SPRING_DATASOURCE_URL=jdbc:postgresql://34.16.82.180:5432/postgres?sslmode=require
             SPRING_DATASOURCE_USERNAME=postgres
             SPRING_DATASOURCE_PASSWORD=${{ secrets.DB_PASSWORD }}
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
