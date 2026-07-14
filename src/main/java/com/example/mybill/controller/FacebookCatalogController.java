@@ -94,7 +94,7 @@ public class FacebookCatalogController {
         data.put("availability", product.getStockQuantity() != null
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
         data.put("condition", "new");
-        data.put("url", productUrl);
+        data.put("link", productUrl);
         data.put("image_url", publicImages.get(0).getImageUrl());
 
         if (publicImages.size() > 1) {
