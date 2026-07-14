@@ -75,7 +75,7 @@ public class FacebookCatalogController {
         String productUrl = ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
 
         // Build Meta items_batch payload
-        String retailerId = "MYBILL_" + productId;
+        String retailerId = String.valueOf(productId);
         ObjectNode data = mapper.createObjectNode();
         data.put("id", retailerId);
         data.put("name", product.getProductName());
