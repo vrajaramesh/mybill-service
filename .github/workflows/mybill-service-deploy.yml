@@ -63,6 +63,7 @@ jobs:
             GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
             RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
             RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
+            META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
           flags: >
             --memory=1Gi
             --cpu=1
