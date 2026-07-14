@@ -23,6 +23,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 import java.util.Optional;
 
 @RestController
@@ -38,6 +39,7 @@ public class FacebookCatalogController {
     @Autowired private FirmRepository firmRepository;
     @Autowired private JwtUtil jwtUtil;
 
+    private static final Logger log = Logger.getLogger(FacebookCatalogController.class.getName());
     private final ObjectMapper mapper = new ObjectMapper();
     private final RestTemplate restTemplate = new RestTemplate();
 
@@ -116,9 +118,11 @@ public class FacebookCatalogController {
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(accessToken);
 
+        log.info("[FB-CATALOG] Sending payload: " + payload.toString());
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(
                 url, new HttpEntity<>(payload.toString(), headers), String.class);
+            log.info("[FB-CATALOG] Meta response: " + response.getBody());
             return ResponseEntity.ok(Map.of(
                 "message", "Published to Facebook catalog",
                 "productId", productId,
