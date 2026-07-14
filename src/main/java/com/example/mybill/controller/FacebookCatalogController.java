@@ -77,7 +77,7 @@ public class FacebookCatalogController {
         // Build Meta items_batch payload
         String retailerId = "MYBILL_" + productId;
         ObjectNode data = mapper.createObjectNode();
-        data.put("retailer_id", retailerId);
+        data.put("id", retailerId);
         data.put("name", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
