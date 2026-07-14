@@ -90,6 +90,8 @@ public class FacebookCatalogController {
         data.put("title", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
+        data.put("brand", product.getCategory() != null && product.getCategory().getCategoryName() != null
+            ? product.getCategory().getCategoryName() : "MyBill");
         data.put("price", price.setScale(2, RoundingMode.HALF_UP).toPlainString() + " INR");
         data.put("availability", product.getStockQuantity() != null
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
@@ -98,9 +100,13 @@ public class FacebookCatalogController {
         data.put("image_link", publicImages.get(0).getImageUrl());
 
         if (publicImages.size() > 1) {
-            ArrayNode extras = mapper.createArrayNode();
-            for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
-            data.set("additional_image_link", extras);
+            // additional_image_link must be pipe-separated string per Meta API spec
+            StringBuilder extras = new StringBuilder();
+            for (int i = 1; i < publicImages.size(); i++) {
+                if (extras.length() > 0) extras.append(",");
+                extras.append(publicImages.get(i).getImageUrl());
+            }
+            data.put("additional_image_link", extras.toString());
         }
 
         ObjectNode request = mapper.createObjectNode();
