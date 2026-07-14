@@ -77,10 +77,11 @@ public class FacebookCatalogController {
         // Build Meta items_batch payload
         String retailerId = "MYBILL_" + productId;
         ObjectNode data = mapper.createObjectNode();
-        data.put("id", retailerId);
+        data.put("retailer_id", retailerId);
         data.put("name", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
+        data.put("brand", "MyBill");
 
         // Price as "AMOUNT CURRENCY" string (Meta catalog format)
         BigDecimal price = product.getSellingPrice() != null ? product.getSellingPrice() : BigDecimal.ZERO;
@@ -90,11 +91,16 @@ public class FacebookCatalogController {
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
         data.put("condition", "new");
         data.put("url", productUrl);
-        data.put("image_url", images.get(0).getImageUrl());
+        // Only use publicly-accessible Cloudinary URLs (GCS bucket URLs require auth)
+        List<ProductImage> publicImages = images.stream()
+            .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://res.cloudinary.com/"))
+            .toList();
+        if (publicImages.isEmpty()) publicImages = images; // fallback: use all images
+        data.put("image_url", publicImages.get(0).getImageUrl());
 
-        if (images.size() > 1) {
+        if (publicImages.size() > 1) {
             ArrayNode extras = mapper.createArrayNode();
-            for (int i = 1; i < images.size(); i++) extras.add(images.get(i).getImageUrl());
+            for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
             data.set("additional_image_urls", extras);
         }
 
