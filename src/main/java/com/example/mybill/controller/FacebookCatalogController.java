@@ -99,7 +99,6 @@ public class FacebookCatalogController {
 
         ObjectNode request = mapper.createObjectNode();
         request.put("method", "UPSERT");
-        request.put("item_type", "PRODUCT_ITEM");
         request.put("retailer_id", "MYBILL_" + productId);
         request.set("data", data);
 
@@ -108,6 +107,7 @@ public class FacebookCatalogController {
 
         ObjectNode payload = mapper.createObjectNode();
         payload.put("allow_upsert", true);
+        payload.put("item_type", "PRODUCT_ITEM");
         payload.set("requests", requests);
 
         // Call Meta Graph API
