@@ -95,12 +95,12 @@ public class FacebookCatalogController {
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
         data.put("condition", "new");
         data.put("link", productUrl);
-        data.put("image_url", publicImages.get(0).getImageUrl());
+        data.put("image_link", publicImages.get(0).getImageUrl());
 
         if (publicImages.size() > 1) {
             ArrayNode extras = mapper.createArrayNode();
             for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
-            data.set("additional_image_urls", extras);
+            data.set("additional_image_links", extras);
         }
 
         ObjectNode request = mapper.createObjectNode();
