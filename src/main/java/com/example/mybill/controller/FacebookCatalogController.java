@@ -16,9 +16,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -76,10 +78,9 @@ public class FacebookCatalogController {
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
 
-        // Price in paise (INR minor units)
+        // Price as "AMOUNT CURRENCY" string (Meta catalog format)
         BigDecimal price = product.getSellingPrice() != null ? product.getSellingPrice() : BigDecimal.ZERO;
-        data.put("price", price.multiply(BigDecimal.valueOf(100)).intValue());
-        data.put("currency", "INR");
+        data.put("price", price.setScale(2, RoundingMode.HALF_UP).toPlainString() + " INR");
 
         data.put("availability", product.getStockQuantity() != null
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
@@ -93,8 +94,8 @@ public class FacebookCatalogController {
             data.set("additional_image_urls", extras);
         }
 
-        if (product.getCategory() != null && product.getCategory().getCategoryName() != null)
-            data.put("google_product_category", "Apparel & Accessories");
+        // google_product_category: 2271 = Apparel & Accessories (Google numeric taxonomy ID)
+        data.put("google_product_category", 2271);
 
         ObjectNode request = mapper.createObjectNode();
         request.put("method", "UPSERT");
@@ -123,6 +124,10 @@ public class FacebookCatalogController {
                 "productName", product.getProductName(),
                 "imagesCount", images.size(),
                 "meta", response.getBody()
+            ));
+        } catch (HttpClientErrorException e) {
+            return ResponseEntity.status(502).body(Map.of(
+                "error", "Meta API rejected request: " + e.getResponseBodyAsString()
             ));
         } catch (Exception e) {
             return ResponseEntity.status(502).body(Map.of(
