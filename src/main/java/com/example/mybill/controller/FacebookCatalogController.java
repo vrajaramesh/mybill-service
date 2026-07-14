@@ -100,7 +100,7 @@ public class FacebookCatalogController {
         if (publicImages.size() > 1) {
             ArrayNode extras = mapper.createArrayNode();
             for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
-            data.set("additional_image_links", extras);
+            data.set("additional_image_link", extras);
         }
 
         ObjectNode request = mapper.createObjectNode();
