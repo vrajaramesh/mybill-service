@@ -74,38 +74,28 @@ public class FacebookCatalogController {
         // Build product URL
         String productUrl = ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
 
-        // Build Meta items_batch payload
+        // Build Meta items_batch payload — minimal required fields only
         String retailerId = String.valueOf(productId);
+
+        // Only use publicly-accessible Cloudinary URLs (GCS bucket URLs require auth)
+        List<ProductImage> publicImages = images.stream()
+            .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://res.cloudinary.com/"))
+            .toList();
+        if (publicImages.isEmpty()) publicImages = images;
+
+        BigDecimal price = product.getSellingPrice() != null ? product.getSellingPrice() : BigDecimal.ZERO;
+
         ObjectNode data = mapper.createObjectNode();
         data.put("id", retailerId);
         data.put("name", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
-        data.put("brand", "MyBill");
-
-        // Price as "AMOUNT CURRENCY" string (Meta catalog format)
-        BigDecimal price = product.getSellingPrice() != null ? product.getSellingPrice() : BigDecimal.ZERO;
         data.put("price", price.setScale(2, RoundingMode.HALF_UP).toPlainString() + " INR");
-
         data.put("availability", product.getStockQuantity() != null
             && product.getStockQuantity().compareTo(BigDecimal.ZERO) > 0 ? "in stock" : "out of stock");
         data.put("condition", "new");
         data.put("url", productUrl);
-        // Only use publicly-accessible Cloudinary URLs (GCS bucket URLs require auth)
-        List<ProductImage> publicImages = images.stream()
-            .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://res.cloudinary.com/"))
-            .toList();
-        if (publicImages.isEmpty()) publicImages = images; // fallback: use all images
         data.put("image_url", publicImages.get(0).getImageUrl());
-
-        if (publicImages.size() > 1) {
-            ArrayNode extras = mapper.createArrayNode();
-            for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
-            data.set("additional_image_urls", extras);
-        }
-
-        // google_product_category: 2271 = Apparel & Accessories (Google numeric taxonomy ID)
-        data.put("google_product_category", 2271);
 
         ObjectNode request = mapper.createObjectNode();
         request.put("method", "CREATE");
@@ -116,7 +106,6 @@ public class FacebookCatalogController {
         requests.add(request);
 
         ObjectNode payload = mapper.createObjectNode();
-        payload.put("allow_upsert", true);
         payload.put("item_type", "PRODUCT_ITEM");
         payload.set("requests", requests);
 
