@@ -75,7 +75,9 @@ public class FacebookCatalogController {
         String productUrl = ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
 
         // Build Meta items_batch payload
+        String retailerId = "MYBILL_" + productId;
         ObjectNode data = mapper.createObjectNode();
+        data.put("id", retailerId);
         data.put("name", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
@@ -100,8 +102,8 @@ public class FacebookCatalogController {
         data.put("google_product_category", 2271);
 
         ObjectNode request = mapper.createObjectNode();
-        request.put("method", "UPSERT");
-        request.put("retailer_id", "MYBILL_" + productId);
+        request.put("method", "CREATE");
+        request.put("retailer_id", retailerId);
         request.set("data", data);
 
         ArrayNode requests = mapper.createArrayNode();
