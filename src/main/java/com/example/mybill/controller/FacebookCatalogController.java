@@ -87,7 +87,7 @@ public class FacebookCatalogController {
 
         ObjectNode data = mapper.createObjectNode();
         data.put("id", retailerId);
-        data.put("name", product.getProductName());
+        data.put("title", product.getProductName());
         data.put("description", product.getDescription() != null && !product.getDescription().isBlank()
             ? product.getDescription() : product.getProductName());
         data.put("price", price.setScale(2, RoundingMode.HALF_UP).toPlainString() + " INR");
@@ -96,6 +96,12 @@ public class FacebookCatalogController {
         data.put("condition", "new");
         data.put("url", productUrl);
         data.put("image_url", publicImages.get(0).getImageUrl());
+
+        if (publicImages.size() > 1) {
+            ArrayNode extras = mapper.createArrayNode();
+            for (int i = 1; i < publicImages.size(); i++) extras.add(publicImages.get(i).getImageUrl());
+            data.set("additional_image_urls", extras);
+        }
 
         ObjectNode request = mapper.createObjectNode();
         request.put("method", "CREATE");
@@ -107,6 +113,7 @@ public class FacebookCatalogController {
 
         ObjectNode payload = mapper.createObjectNode();
         payload.put("item_type", "PRODUCT_ITEM");
+        payload.put("allow_upsert", true);
         payload.set("requests", requests);
 
         // Call Meta Graph API
