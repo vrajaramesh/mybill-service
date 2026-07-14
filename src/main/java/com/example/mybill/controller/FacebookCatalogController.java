@@ -99,6 +99,7 @@ public class FacebookCatalogController {
 
         ObjectNode request = mapper.createObjectNode();
         request.put("method", "UPSERT");
+        request.put("item_type", "PRODUCT_ITEM");
         request.put("retailer_id", "MYBILL_" + productId);
         request.set("data", data);
 
