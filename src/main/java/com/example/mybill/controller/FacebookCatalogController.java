@@ -133,10 +133,12 @@ public class FacebookCatalogController {
                 "meta", response.getBody()
             ));
         } catch (HttpClientErrorException e) {
+            log.warning("[FB-CATALOG] Meta API " + e.getStatusCode() + ": " + e.getResponseBodyAsString());
             return ResponseEntity.status(502).body(Map.of(
                 "error", "Meta API rejected request: " + e.getResponseBodyAsString()
             ));
         } catch (Exception e) {
+            log.warning("[FB-CATALOG] Meta API exception: " + e.getMessage());
             return ResponseEntity.status(502).body(Map.of(
                 "error", "Meta API error: " + e.getMessage()
             ));
