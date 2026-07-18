@@ -71,8 +71,10 @@ public class FacebookCatalogController {
         if (images.isEmpty())
             return ResponseEntity.badRequest().body(Map.of("error", "Product has no images. Add at least one image before publishing."));
 
-        // Build product URL
-        String productUrl = ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
+        // Build product URL — srisa firm uses its custom domain
+        String productUrl = "srisa".equals(firmCode)
+            ? "https://srisafabrics.com/srisa?product=" + productId
+            : ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
 
         // Build Meta items_batch payload — minimal required fields only
         String retailerId = String.valueOf(productId);
