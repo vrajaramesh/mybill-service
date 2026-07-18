@@ -73,7 +73,7 @@ public class FacebookCatalogController {
 
         // Build product URL — srisa firm uses its custom domain
         String productUrl = "srisa".equals(firmCode)
-            ? "https://srisafabrics.com/srisa?product=" + productId
+            ? "https://srisafabrics.com?product=" + productId
             : ecomBaseUrl + "?firmCode=" + firmCode + "&product=" + productId;
 
         // Build Meta items_batch payload — minimal required fields only
