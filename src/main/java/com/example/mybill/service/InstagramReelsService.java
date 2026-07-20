@@ -80,20 +80,17 @@ public class InstagramReelsService {
                     price       = p.getSellingPrice();
                 }
 
-                // Cloudinary images only (publicly accessible)
+                // Accept Cloudinary or GCS URLs — both are publicly accessible in production
                 productImageRepository
                     .findByProductProductIdOrderBySortOrderAscCreatedAtAsc(pid)
                     .stream()
                     .filter(i -> !"video".equals(i.getMediaType()))
-                    .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://res.cloudinary.com/"))
+                    .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://"))
                     .map(ProductImage::getImageUrl)
                     .forEach(imageUrls::add);
 
                 // Caption from Hermes (first product that has one)
                 if (caption == null) {
-                    marketingContentRepo.findById(pid).ifPresent(mc -> {
-                        // nothing to assign here — handled below
-                    });
                     caption = marketingContentRepo.findById(pid)
                         .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
                         .orElse(null);
@@ -101,7 +98,7 @@ public class InstagramReelsService {
             }
 
             if (imageUrls.isEmpty()) {
-                fail(jobId, "No Cloudinary images found for the given products");
+                fail(jobId, "No images found for the given products");
                 return;
             }
 
