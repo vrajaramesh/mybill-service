@@ -57,7 +57,7 @@ public class HermesController {
             String schema = firm.getSchemaName();
             List<Map<String, Object>> rows = new ArrayList<>();
             String sql =
-                "SELECT p.product_id, p.product_name, p.selling_price, " +
+                "SELECT p.product_id, p.product_name, p.selling_price, p.category_name, " +
                 "  (SELECT image_url FROM product_images i WHERE i.product_id=p.product_id " +
                 "   ORDER BY i.created_at ASC LIMIT 1) AS image_url, " +
                 "  mc.instagram_caption, mc.whatsapp_text, mc.hashtags, mc.seo_description, mc.generated_at " +
@@ -77,6 +77,7 @@ public class HermesController {
                         row.put("productId",        rs.getInt("product_id"));
                         row.put("productName",       rs.getString("product_name"));
                         row.put("sellingPrice",      rs.getBigDecimal("selling_price"));
+                        row.put("category",          rs.getString("category_name"));
                         row.put("imageUrl",          rs.getString("image_url"));
                         row.put("instagramCaption",  rs.getString("instagram_caption"));
                         row.put("whatsappText",      rs.getString("whatsapp_text"));
