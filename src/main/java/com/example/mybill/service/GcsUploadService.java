@@ -59,6 +59,18 @@ public class GcsUploadService implements ImageUploadService {
         }
     }
 
+    public String uploadVideo(byte[] bytes) {
+        try {
+            String objectName = "reels/" + UUID.randomUUID() + ".mp4";
+            BlobId blobId = BlobId.of(bucketName, objectName);
+            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType("video/mp4").build();
+            storage.create(blobInfo, bytes);
+            return "https://storage.googleapis.com/" + bucketName + "/" + objectName;
+        } catch (Exception e) {
+            throw new RuntimeException("GCS video upload error: " + e.getMessage(), e);
+        }
+    }
+
     @Override
     public String uploadFromUrl(String imageUrl) {
         try {

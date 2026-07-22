@@ -26,7 +26,7 @@ public class InstagramReelsService {
 
     @Autowired private ProductService productService;
     @Autowired private ProductMarketingContentRepository marketingContentRepo;
-    @Autowired private CreatomateService creatomateService;
+    @Autowired private FFmpegVideoService ffmpegVideoService;
 
     private static final Logger log = Logger.getLogger(InstagramReelsService.class.getName());
     private final ObjectMapper mapper = new ObjectMapper();
@@ -111,9 +111,9 @@ public class InstagramReelsService {
                 .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
                 .orElse(productName + "\n\n#srisafabrics #fashion #fabric #saree");
 
-            // 2. Render via Creatomate
-            update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s) via Creatomate...", null, null);
-            String videoUrl = creatomateService.renderSlideshow(imageUrls);
+            // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
+            update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);
+            String videoUrl = ffmpegVideoService.generateSlideshow(imageUrls, productName);
             log.info("[Reels] Video rendered: " + videoUrl);
 
             // 3. Create Instagram media container (resolves Page Access Token once)

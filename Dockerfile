@@ -8,6 +8,10 @@ RUN mvn package -DskipTests -q
 
 # Stage 2: Runtime
 FROM --platform=linux/amd64 eclipse-temurin:17-jre
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /app/target/mybill-service-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8080
