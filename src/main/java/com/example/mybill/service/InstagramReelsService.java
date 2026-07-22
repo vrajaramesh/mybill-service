@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
@@ -186,16 +188,19 @@ public class InstagramReelsService {
     }
 
     private String createContainer(String videoUrl, String caption, IgContext ctx) throws Exception {
-        String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + ctx.igUserId() + "/media")
-            .queryParam("media_type", "REELS")
-            .queryParam("video_url", videoUrl)
-            .queryParam("caption", caption)
-            .queryParam("share_to_feed", "true")
-            .queryParam("access_token", ctx.pageToken())
-            .build(false).toUriString();
+        // Instagram requires POST params in the request body (form-encoded), not as URL query params
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        ResponseEntity<String> response = rest.postForEntity(url, null, String.class);
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("media_type",    "REELS");
+        form.add("video_url",     videoUrl);
+        form.add("caption",       caption != null ? caption : "");
+        form.add("share_to_feed", "true");
+        form.add("access_token",  ctx.pageToken());
+
+        String endpoint = graphUrl + "/" + ctx.igUserId() + "/media";
+        ResponseEntity<String> response = rest.postForEntity(endpoint, new HttpEntity<>(form, headers), String.class);
         JsonNode body = mapper.readTree(response.getBody());
         if (body.has("error"))
             throw new RuntimeException("Instagram container error: " + body.path("error").path("message").asText());
@@ -209,7 +214,7 @@ public class InstagramReelsService {
                 .fromHttpUrl(graphUrl + "/" + containerId)
                 .queryParam("fields", "status_code,status")
                 .queryParam("access_token", ctx.pageToken())
-                .build(false).toUriString();
+                .build(true).toUriString();
 
             JsonNode body = mapper.readTree(rest.getForEntity(url, String.class).getBody());
             String statusCode = body.path("status_code").asText();
@@ -222,13 +227,15 @@ public class InstagramReelsService {
     }
 
     private String publishContainer(String containerId, IgContext ctx) throws Exception {
-        String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + ctx.igUserId() + "/media_publish")
-            .queryParam("creation_id", containerId)
-            .queryParam("access_token", ctx.pageToken())
-            .build(false).toUriString();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        JsonNode body = mapper.readTree(rest.postForEntity(url, null, String.class).getBody());
+        MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+        form.add("creation_id",  containerId);
+        form.add("access_token", ctx.pageToken());
+
+        String endpoint = graphUrl + "/" + ctx.igUserId() + "/media_publish";
+        JsonNode body = mapper.readTree(rest.postForEntity(endpoint, new HttpEntity<>(form, headers), String.class).getBody());
         if (body.has("error"))
             throw new RuntimeException("Instagram publish error: " + body.path("error").path("message").asText());
         return body.path("id").asText();
