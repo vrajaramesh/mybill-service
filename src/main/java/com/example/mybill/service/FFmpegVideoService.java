@@ -91,22 +91,28 @@ public class FFmpegVideoService {
         StringBuilder fc = new StringBuilder();
 
         for (int i = 0; i < n; i++) {
-            // Scale to 1.15x output size (cover), center-crop to exact 1.15x size,
-            // then progressively crop a shrinking window (zoom-in effect using time t).
-            // At t=0: crop_w=scaledW → scale to WIDTH = showing full area (1x zoom)
-            // At t=3.72: crop_w=WIDTH → scale to WIDTH = showing inner area (1.15x zoom)
-            // Uses 'crop' filter with 't' (time in seconds) — no frame buffering needed.
+            // Alternate zoom direction per slide for a true Ken Burns effect:
+            //   Even slides: zoom IN  (100% → 115%) — crop window shrinks over time
+            //   Odd  slides: zoom OUT (115% → 100%) — crop window grows over time
+            boolean zoomIn = (i % 2 == 0);
+            String wExpr = zoomIn
+                ? scaledW + "/(1+0.15*min(t/3.72\\,1))"
+                : scaledW + "/(1+0.15*(1-min(t/3.72\\,1)))";
+            String hExpr = zoomIn
+                ? scaledH + "/(1+0.15*min(t/3.72\\,1))"
+                : scaledH + "/(1+0.15*(1-min(t/3.72\\,1)))";
+
             fc.append(String.format(
                 "[%d:v]" +
                 "scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos," +
                 "crop=%d:%d:(iw-%d)/2:(ih-%d)/2," +
-                "crop=w='%d/(1+0.15*min(t/3.72\\,1))':h='%d/(1+0.15*min(t/3.72\\,1))':x='(iw-ow)/2':y='(ih-oh)/2'," +
+                "crop=w='%s':h='%s':x='(iw-ow)/2':y='(ih-oh)/2'," +
                 "scale=%d:%d:flags=lanczos," +
                 "setpts=PTS-STARTPTS[v%d];",
                 i,
                 scaledW, scaledH,
                 scaledW, scaledH, scaledW, scaledH,
-                scaledW, scaledH,
+                wExpr, hExpr,
                 WIDTH, HEIGHT,
                 i
             ));
