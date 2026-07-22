@@ -106,6 +106,7 @@ public class FFmpegVideoService {
                 "[%d:v]" +
                 "scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos," +
                 "crop=%d:%d:(iw-%d)/2:(ih-%d)/2," +
+                "setpts=PTS-STARTPTS," +
                 "crop=w='%s':h='%s':x='(iw-ow)/2':y='(ih-oh)/2'," +
                 "scale=%d:%d:flags=lanczos," +
                 "format=yuv420p," +
