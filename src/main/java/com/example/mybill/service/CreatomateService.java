@@ -34,12 +34,19 @@ public class CreatomateService {
 
         ObjectNode modifications = mapper.createObjectNode();
         for (int i = 0; i < Math.min(imageUrls.size(), 5); i++) {
-            modifications.put("Image-" + (i + 1), imageUrls.get(i));
+            ObjectNode imgNode = mapper.createObjectNode();
+            imgNode.put("source", imageUrls.get(i));
+            imgNode.put("fit",    "cover");
+            modifications.set("Image-" + (i + 1), imgNode);
         }
 
         ObjectNode payload = mapper.createObjectNode();
         payload.put("template_id", templateId);
         payload.set("modifications", modifications);
+        // Force 1080×1920 (9:16) at 30fps for Instagram Reels quality
+        payload.put("width",      1080);
+        payload.put("height",     1920);
+        payload.put("frame_rate", 30);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
