@@ -69,49 +69,52 @@ public class FFmpegVideoService {
     }
 
     private void runFFmpeg(List<Path> images, Path music, Path output, String productName) throws Exception {
-        int n              = images.size();
-        int slideFrames    = (int) (SLIDE_DURATION * FPS);
-        double zoomStep    = (ZOOM_END - 1.0) / slideFrames;
-        double totalSecs   = n * SLIDE_DURATION;
+        int n            = images.size();
+        double totalSecs = n * SLIDE_DURATION;
+
+        // 1.15x dimensions — image is pre-scaled to this, then progressively cropped
+        // to simulate Ken Burns zoom-in (100% → 115%) without zoompan's memory cost
+        int scaledW = (int) (WIDTH  * ZOOM_END); // 1242
+        int scaledH = (int) (HEIGHT * ZOOM_END); // 2208
 
         List<String> cmd = new ArrayList<>();
         cmd.add("ffmpeg");
         cmd.add("-y");
 
-        // Image inputs — loop each for slide duration
         for (Path img : images) {
             cmd.addAll(List.of("-loop", "1", "-t", String.valueOf(SLIDE_DURATION),
+                               "-r", String.valueOf(FPS),
                                "-i", img.toAbsolutePath().toString()));
         }
-        // Music input
         cmd.addAll(List.of("-i", music.toAbsolutePath().toString()));
 
-        // Build filter_complex
         StringBuilder fc = new StringBuilder();
 
-        // Per-image: scale to cover canvas, crop to exact canvas, apply Ken Burns zoom
         for (int i = 0; i < n; i++) {
+            // Scale to 1.15x output size (cover), center-crop to exact 1.15x size,
+            // then progressively crop a shrinking window (zoom-in effect using time t).
+            // At t=0: crop_w=scaledW → scale to WIDTH = showing full area (1x zoom)
+            // At t=3.72: crop_w=WIDTH → scale to WIDTH = showing inner area (1.15x zoom)
+            // Uses 'crop' filter with 't' (time in seconds) — no frame buffering needed.
             fc.append(String.format(
-                "[%d:v]scale=%d:%d:force_original_aspect_ratio=increase," +
-                "crop=%d:%d," +
-                "zoompan=z='min(zoom+%.8f,%.4f)'" +
-                ":x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'" +
-                ":d=%d:s=%dx%d:fps=%d," +
+                "[%d:v]" +
+                "scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos," +
+                "crop=%d:%d:(iw-%d)/2:(ih-%d)/2," +
+                "crop=w='%d/(1+0.15*min(t/3.72\\,1))':h='%d/(1+0.15*min(t/3.72\\,1))':x='(iw-ow)/2':y='(ih-oh)/2'," +
+                "scale=%d:%d:flags=lanczos," +
                 "setpts=PTS-STARTPTS[v%d];",
                 i,
+                scaledW, scaledH,
+                scaledW, scaledH, scaledW, scaledH,
+                scaledW, scaledH,
                 WIDTH, HEIGHT,
-                WIDTH, HEIGHT,
-                zoomStep, ZOOM_END,
-                slideFrames, WIDTH, HEIGHT, FPS,
                 i
             ));
         }
 
-        // Crossfade concat of all slides
         for (int i = 0; i < n; i++) fc.append("[v").append(i).append("]");
         fc.append("concat=n=").append(n).append(":v=1:a=0[slided];");
 
-        // Text overlay: product name at bottom + branding
         String safe = productName != null
             ? productName.replace("'", "\\'").replace(":", "\\:").replace(",", "\\,")
             : "New Arrival";
@@ -124,18 +127,14 @@ public class FFmpegVideoService {
             "drawtext=fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf" +
             ":text='SRISA FABRICS':fontsize=34:fontcolor=white@0.85" +
             ":x=(w-text_w)/2:y=h*0.93" +
-            ":shadowcolor=black@0.6:shadowx=1:shadowy=1" +
-            "[outv]",
+            ":shadowcolor=black@0.6:shadowx=1:shadowy=1[outv]",
             safe
         ));
 
         cmd.addAll(List.of("-filter_complex", fc.toString()));
         cmd.addAll(List.of("-map", "[outv]", "-map", n + ":a"));
-
-        // H.264 high quality
-        cmd.addAll(List.of("-c:v", "libx264", "-preset", "medium", "-crf", "18"));
+        cmd.addAll(List.of("-c:v", "libx264", "-preset", "faster", "-crf", "18"));
         cmd.addAll(List.of("-pix_fmt", "yuv420p"));
-        // AAC audio, truncate to video length
         cmd.addAll(List.of("-c:a", "aac", "-b:a", "192k", "-shortest"));
         cmd.addAll(List.of("-t", String.format("%.1f", totalSecs)));
         cmd.add(output.toAbsolutePath().toString());
@@ -146,11 +145,11 @@ public class FFmpegVideoService {
         pb.redirectErrorStream(true);
         Process proc = pb.start();
 
-        String out = new String(proc.getInputStream().readAllBytes());
+        String ffOut = new String(proc.getInputStream().readAllBytes());
         int exit = proc.waitFor();
 
         if (exit != 0) {
-            String tail = out.length() > 2000 ? out.substring(out.length() - 2000) : out;
+            String tail = ffOut.length() > 2000 ? ffOut.substring(ffOut.length() - 2000) : ffOut;
             throw new RuntimeException("FFmpeg failed (exit=" + exit + "): " + tail);
         }
         log.info("[FFmpeg] Render complete: " + output + " (" + Files.size(output) / 1024 + " KB)");
