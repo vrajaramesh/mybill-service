@@ -40,8 +40,8 @@ public class InstagramReelsController {
             return ResponseEntity.badRequest().body(Map.of("error", "Invalid productId or imageUrls"));
         }
 
-        if (imageUrls.isEmpty() || imageUrls.size() > 5)
-            return ResponseEntity.badRequest().body(Map.of("error", "Select 1 to 5 images"));
+        if (imageUrls.size() != 5)
+            return ResponseEntity.badRequest().body(Map.of("error", "Exactly 5 images are required"));
 
         String schema = TenantContext.getCurrentTenant();
         String jobId  = reelsService.publish(productId, imageUrls, schema);
