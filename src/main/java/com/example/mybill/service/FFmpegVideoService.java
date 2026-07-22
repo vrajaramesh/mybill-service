@@ -108,6 +108,7 @@ public class FFmpegVideoService {
                 "crop=%d:%d:(iw-%d)/2:(ih-%d)/2," +
                 "crop=w='%s':h='%s':x='(iw-ow)/2':y='(ih-oh)/2'," +
                 "scale=%d:%d:flags=lanczos," +
+                "format=yuv420p," +
                 "setpts=PTS-STARTPTS[v%d];",
                 i,
                 scaledW, scaledH,
