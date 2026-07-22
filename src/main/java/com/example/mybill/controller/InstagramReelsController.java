@@ -17,53 +17,46 @@ public class InstagramReelsController {
     @Autowired private InstagramReelsService reelsService;
 
     /**
-     * Start an async Reels publish job.
-     *
      * POST /api/instagram/reels/publish
-     * Body: { "productIds": [6166, 6167] }
-     *
+     * Body: { "productId": 6166, "imageUrls": ["https://...", ...] }
      * Returns immediately with a jobId. Poll /status/{jobId} for progress.
      */
     @PostMapping("/publish")
     public ResponseEntity<?> publish(@RequestBody Map<String, Object> body) {
-        Object raw = body.get("productIds");
-        if (raw == null) {
-            return ResponseEntity.badRequest().body(Map.of("error", "productIds is required"));
-        }
+        Object rawId   = body.get("productId");
+        Object rawUrls = body.get("imageUrls");
 
-        List<Integer> productIds;
+        if (rawId == null || rawUrls == null)
+            return ResponseEntity.badRequest().body(Map.of("error", "productId and imageUrls are required"));
+
+        Integer productId;
+        List<String> imageUrls;
         try {
+            productId = Integer.parseInt(rawId.toString());
             @SuppressWarnings("unchecked")
-            List<Object> list = (List<Object>) raw;
-            productIds = list.stream()
-                .map(o -> Integer.parseInt(o.toString()))
-                .toList();
+            List<Object> list = (List<Object>) rawUrls;
+            imageUrls = list.stream().map(Object::toString).toList();
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("error", "productIds must be a list of integers"));
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid productId or imageUrls"));
         }
 
-        if (productIds.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "productIds must not be empty"));
-        }
+        if (imageUrls.isEmpty() || imageUrls.size() > 5)
+            return ResponseEntity.badRequest().body(Map.of("error", "Select 1 to 5 images"));
 
         String schema = TenantContext.getCurrentTenant();
-        String jobId  = reelsService.publish(productIds, schema);
+        String jobId  = reelsService.publish(productId, imageUrls, schema);
 
         return ResponseEntity.accepted().body(Map.of(
             "jobId",      jobId,
             "status",     "queued",
-            "message",    "Reel creation started for " + productIds.size() + " product(s)",
-            "productIds", productIds,
+            "message",    "Reel creation started with " + imageUrls.size() + " image(s)",
             "statusUrl",  "/api/instagram/reels/status/" + jobId
         ));
     }
 
     /**
-     * Poll job status.
-     *
      * GET /api/instagram/reels/status/{jobId}
      * Returns: { jobId, status, message, instagramPostId, videoUrl }
-     * status values: queued | rendering | uploading | publishing | done | failed
      */
     @GetMapping("/status/{jobId}")
     public ResponseEntity<?> status(@PathVariable String jobId) {

@@ -18,39 +18,38 @@ import java.util.logging.Logger;
 @Service
 public class InstagramReelsService {
 
-    @Value("${instagram.user.id}")       private String igUserId;
-    @Value("${instagram.graph.url}")     private String graphUrl;
-    @Value("${meta.access.token:}")      private String accessToken;
+    @Value("${instagram.user.id}")    private String igUserId;
+    @Value("${instagram.graph.url}")  private String graphUrl;
+    @Value("${meta.access.token:}")   private String accessToken;
 
     @Autowired private ProductService productService;
-    @Autowired private ProductImageRepository productImageRepository;
     @Autowired private ProductMarketingContentRepository marketingContentRepo;
-    @Autowired private ShotstackService shotstackService;
+    @Autowired private CreatomateService creatomateService;
 
     private static final Logger log = Logger.getLogger(InstagramReelsService.class.getName());
     private final ObjectMapper mapper = new ObjectMapper();
-    private final RestTemplate rest = new RestTemplate();
+    private final RestTemplate rest   = new RestTemplate();
 
-    // In-memory job tracker: jobId → ReelsJobStatus
     private final ConcurrentHashMap<String, ReelsJobStatus> jobs = new ConcurrentHashMap<>();
 
     // ── Public API ────────────────────────────────────────────────────────────
 
     public record ReelsJobStatus(
         String jobId,
-        String status,       // queued | rendering | uploading | publishing | done | failed
+        String status,         // queued | rendering | uploading | publishing | done | failed
         String message,
         String instagramPostId,
         String videoUrl
     ) {}
 
     /**
-     * Starts async Reels creation. Returns a jobId immediately.
+     * Starts async Reel creation from explicit image URLs + a product for caption.
+     * Returns a jobId immediately.
      */
-    public String publish(List<Integer> productIds, String schema) {
+    public String publish(Integer productId, List<String> imageUrls, String schema) {
         String jobId = UUID.randomUUID().toString();
         jobs.put(jobId, new ReelsJobStatus(jobId, "queued", "Job queued", null, null));
-        publishAsync(jobId, productIds, schema);
+        publishAsync(jobId, productId, imageUrls, schema);
         return jobId;
     }
 
@@ -61,62 +60,29 @@ public class InstagramReelsService {
     // ── Async orchestration ───────────────────────────────────────────────────
 
     @Async
-    public void publishAsync(String jobId, List<Integer> productIds, String schema) {
+    public void publishAsync(String jobId, Integer productId, List<String> imageUrls, String schema) {
         TenantContext.setCurrentTenant(schema);
         try {
-            // 1. Collect images + build caption from first product
-            List<String> imageUrls = new ArrayList<>();
-            String productName    = "New Arrival";
-            java.math.BigDecimal price = null;
-            String caption        = null;
+            // 1. Build caption from Hermes content
+            String productName = "New Arrival";
+            Optional<Product> productOpt = productService.getProductById(productId);
+            if (productOpt.isPresent()) productName = productOpt.get().getProductName();
 
-            for (Integer pid : productIds) {
-                Optional<Product> opt = productService.getProductById(pid);
-                if (opt.isEmpty()) continue;
+            String caption = marketingContentRepo.findById(productId)
+                .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
+                .orElse(productName + "\n\n#srisafabrics #fashion #fabric #saree");
 
-                Product p = opt.get();
-                if (productName.equals("New Arrival")) {
-                    productName = p.getProductName();
-                    price       = p.getSellingPrice();
-                }
-
-                // Accept Cloudinary or GCS URLs — both are publicly accessible in production
-                productImageRepository
-                    .findByProductProductIdOrderBySortOrderAscCreatedAtAsc(pid)
-                    .stream()
-                    .filter(i -> !"video".equals(i.getMediaType()))
-                    .filter(i -> i.getImageUrl() != null && i.getImageUrl().startsWith("https://"))
-                    .map(ProductImage::getImageUrl)
-                    .forEach(imageUrls::add);
-
-                // Caption from Hermes (first product that has one)
-                if (caption == null) {
-                    caption = marketingContentRepo.findById(pid)
-                        .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
-                        .orElse(null);
-                }
-            }
-
-            if (imageUrls.isEmpty()) {
-                fail(jobId, "No images found for the given products");
-                return;
-            }
-
-            if (caption == null) {
-                caption = productName + "\n\n#srisafabrics #fashion #fabric #saree";
-            }
-
-            // 2. Render video via Shotstack
-            update(jobId, "rendering", "Rendering slideshow video (" + imageUrls.size() + " images)...", null, null);
-            String videoUrl = shotstackService.renderSlideshow(imageUrls, productName, price);
+            // 2. Render via Creatomate
+            update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s) via Creatomate...", null, null);
+            String videoUrl = creatomateService.renderSlideshow(imageUrls);
             log.info("[Reels] Video rendered: " + videoUrl);
 
             // 3. Create Instagram media container
-            update(jobId, "uploading", "Uploading to Instagram...", null, videoUrl);
+            update(jobId, "uploading", "Uploading video to Instagram...", null, videoUrl);
             String containerId = createContainer(videoUrl, caption);
             log.info("[Reels] Container created: " + containerId);
 
-            // 4. Wait for container to be ready
+            // 4. Wait for container FINISHED
             waitForContainer(containerId);
 
             // 5. Publish
@@ -124,7 +90,7 @@ public class InstagramReelsService {
             String postId = publishContainer(containerId);
             log.info("[Reels] Published! Post ID: " + postId);
 
-            jobs.put(jobId, new ReelsJobStatus(jobId, "done", "Reel published successfully", postId, videoUrl));
+            jobs.put(jobId, new ReelsJobStatus(jobId, "done", "Reel published successfully!", postId, videoUrl));
 
         } catch (Exception e) {
             log.warning("[Reels] Job " + jobId + " failed: " + e.getMessage());
@@ -148,35 +114,28 @@ public class InstagramReelsService {
 
         ResponseEntity<String> response = rest.postForEntity(url, null, String.class);
         JsonNode body = mapper.readTree(response.getBody());
-
-        if (body.has("error")) {
+        if (body.has("error"))
             throw new RuntimeException("Instagram container error: " + body.path("error").path("message").asText());
-        }
         return body.path("id").asText();
     }
 
     private void waitForContainer(String containerId) throws Exception {
-        for (int i = 0; i < 24; i++) { // max 2 min
+        for (int i = 0; i < 24; i++) {
             Thread.sleep(5000);
-
             String url = UriComponentsBuilder
                 .fromHttpUrl(graphUrl + "/" + containerId)
                 .queryParam("fields", "status_code,status")
                 .queryParam("access_token", accessToken)
                 .build(false).toUriString();
 
-            ResponseEntity<String> response = rest.getForEntity(url, String.class);
-            JsonNode body = mapper.readTree(response.getBody());
+            JsonNode body = mapper.readTree(rest.getForEntity(url, String.class).getBody());
             String statusCode = body.path("status_code").asText();
             log.info("[Reels] Container " + containerId + " status: " + statusCode);
-
             if ("FINISHED".equals(statusCode)) return;
-            if ("ERROR".equals(statusCode) || "EXPIRED".equals(statusCode)) {
-                throw new RuntimeException("Instagram container status: " + statusCode
-                    + " — " + body.path("status").asText());
-            }
+            if ("ERROR".equals(statusCode) || "EXPIRED".equals(statusCode))
+                throw new RuntimeException("Instagram container status: " + statusCode + " — " + body.path("status").asText());
         }
-        throw new RuntimeException("Instagram container timed out waiting for FINISHED status");
+        throw new RuntimeException("Instagram container timed out");
     }
 
     private String publishContainer(String containerId) throws Exception {
@@ -186,12 +145,9 @@ public class InstagramReelsService {
             .queryParam("access_token", accessToken)
             .build(false).toUriString();
 
-        ResponseEntity<String> response = rest.postForEntity(url, null, String.class);
-        JsonNode body = mapper.readTree(response.getBody());
-
-        if (body.has("error")) {
+        JsonNode body = mapper.readTree(rest.postForEntity(url, null, String.class).getBody());
+        if (body.has("error"))
             throw new RuntimeException("Instagram publish error: " + body.path("error").path("message").asText());
-        }
         return body.path("id").asText();
     }
 
@@ -212,7 +168,7 @@ public class InstagramReelsService {
     }
 
     private void fail(String jobId, String message) {
-        ReelsJobStatus current = jobs.getOrDefault(jobId, new ReelsJobStatus(jobId, "failed", message, null, null));
-        jobs.put(jobId, new ReelsJobStatus(jobId, "failed", message, null, current.videoUrl()));
+        ReelsJobStatus cur = jobs.getOrDefault(jobId, new ReelsJobStatus(jobId, "failed", message, null, null));
+        jobs.put(jobId, new ReelsJobStatus(jobId, "failed", message, null, cur.videoUrl()));
     }
 }
