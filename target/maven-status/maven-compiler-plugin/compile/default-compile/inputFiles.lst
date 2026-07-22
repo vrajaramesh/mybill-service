@@ -40,6 +40,7 @@
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/PurchasePaymentService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ProductVectorService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ChatSummaryService.java
+/Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/CreatomateService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/SchemaColumnMigrationRunner.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ChatService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/AuthController.java
@@ -60,6 +61,7 @@
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/repository/AiGenerationPromptRepository.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/repository/ProductSubCategoryRepository.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ProductService.java
+/Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/FacebookCatalogController.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/dto/UserFirmAccess.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/GeminiService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/dto/Supplier.java
@@ -110,6 +112,7 @@
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/AiConfigController.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/multitenancy/SchemaMultiTenantConnectionProvider.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/PurchaseService.java
+/Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/InstagramReelsService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ExtraCharge.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/RazorpayController.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/ChatController.java
@@ -117,6 +120,7 @@
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/dto/ProductImage.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/GcsUploadService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/PhotoResult.java
+/Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/controller/InstagramReelsController.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/repository/ProductCategoryRepository.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/service/ImageEmbeddingService.java
 /Users/rajarameshvadlani/mybill/mybill-service/src/main/java/com/example/mybill/repository/AppUserRepository.java

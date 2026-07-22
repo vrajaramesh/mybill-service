@@ -1,10 +1,12 @@
 com/example/mybill/service/ProductImageRepository.class
 com/example/mybill/service/MybillServiceApplication.class
 com/example/mybill/service/HermesAgentService.class
+com/example/mybill/service/CreatomateService.class
 com/example/mybill/service/BoutiqueOrderImageRepository.class
 com/example/mybill/service/ProductRepository.class
 com/example/mybill/service/CustomerService.class
 com/example/mybill/service/StitchingOrder.class
+com/example/mybill/controller/FacebookCatalogController.class
 com/example/mybill/service/PurchaseItemRepository.class
 com/example/mybill/service/AiSchemaInitializer.class
 com/example/mybill/service/ImageUploadService.class
@@ -18,6 +20,7 @@ com/example/mybill/service/PurchaseService.class
 com/example/mybill/controller/PublicController.class
 com/example/mybill/service/ChatSummaryService.class
 com/example/mybill/service/StitchingOrderRepository.class
+com/example/mybill/controller/InstagramReelsController.class
 com/example/mybill/service/AIPhotoRequest.class
 com/example/mybill/service/SuperadminInitializer.class
 com/example/mybill/dto/AppUserPublic.class
@@ -49,6 +52,7 @@ com/example/mybill/service/RoleService.class
 com/example/mybill/service/ProductContentService.class
 com/example/mybill/service/ChatService.class
 com/example/mybill/service/ProductSearchResult.class
+com/example/mybill/service/InstagramReelsService.class
 com/example/mybill/controller/AIPhotoController.class
 com/example/mybill/service/ChatService$ChatRequest.class
 com/example/mybill/service/AppUserRepository.class
@@ -57,6 +61,7 @@ com/example/mybill/service/PurchaseItemService.class
 com/example/mybill/service/CustomerController.class
 com/example/mybill/service/CloudinaryUploadService.class
 com/example/mybill/service/Product.class
+com/example/mybill/service/InstagramReelsService$ReelsJobStatus.class
 com/example/mybill/service/SupplierRepository.class
 com/example/mybill/service/BillService.class
 com/example/mybill/service/PhotoResult.class
