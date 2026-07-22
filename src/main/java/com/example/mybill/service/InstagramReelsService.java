@@ -57,6 +57,43 @@ public class InstagramReelsService {
         return Optional.ofNullable(jobs.get(jobId));
     }
 
+    public Map<String, Object> debugTokenAccess() throws Exception {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("configuredIgUserId", igUserId);
+
+        // Pages
+        String pagesUrl = UriComponentsBuilder
+            .fromHttpUrl(graphUrl + "/me/accounts")
+            .queryParam("access_token", accessToken)
+            .build(false).toUriString();
+
+        JsonNode pages = mapper.readTree(rest.getForEntity(pagesUrl, String.class).getBody());
+        if (pages.has("error")) {
+            result.put("pagesError", pages.path("error").path("message").asText());
+            return result;
+        }
+
+        List<Map<String, Object>> pagesList = new ArrayList<>();
+        for (JsonNode page : pages.path("data")) {
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("pageId",   page.path("id").asText());
+            p.put("pageName", page.path("name").asText());
+
+            String igCheckUrl = UriComponentsBuilder
+                .fromHttpUrl(graphUrl + "/" + page.path("id").asText())
+                .queryParam("fields", "instagram_business_account")
+                .queryParam("access_token", accessToken)
+                .build(false).toUriString();
+
+            JsonNode pageData = mapper.readTree(rest.getForEntity(igCheckUrl, String.class).getBody());
+            JsonNode igAcc = pageData.path("instagram_business_account");
+            p.put("instagramBusinessAccountId", igAcc.has("id") ? igAcc.path("id").asText() : null);
+            pagesList.add(p);
+        }
+        result.put("pages", pagesList);
+        return result;
+    }
+
     // ── Async orchestration ───────────────────────────────────────────────────
 
     @Async
@@ -102,9 +139,54 @@ public class InstagramReelsService {
 
     // ── Instagram Graph API ───────────────────────────────────────────────────
 
+    /**
+     * Resolves the Instagram Business Account ID linked to the token's Facebook Pages.
+     * This avoids hardcoding the IG user ID (which differs from the Business Suite asset ID).
+     */
+    private String resolveIgUserId() throws Exception {
+        // 1. Get Facebook Pages the token can manage
+        String pagesUrl = UriComponentsBuilder
+            .fromHttpUrl(graphUrl + "/me/accounts")
+            .queryParam("access_token", accessToken)
+            .build(false).toUriString();
+
+        JsonNode pages = mapper.readTree(rest.getForEntity(pagesUrl, String.class).getBody());
+        log.info("[Reels] Pages response: " + pages.toString().substring(0, Math.min(500, pages.toString().length())));
+
+        if (pages.has("error"))
+            throw new RuntimeException("Could not fetch pages: " + pages.path("error").path("message").asText());
+
+        JsonNode pageList = pages.path("data");
+        if (!pageList.isArray() || pageList.isEmpty())
+            throw new RuntimeException("No Facebook Pages found for this token. Make sure the token has pages_show_list permission.");
+
+        // 2. For each page, look for a linked Instagram Business Account
+        for (JsonNode page : pageList) {
+            String pageId = page.path("id").asText();
+            String igCheckUrl = UriComponentsBuilder
+                .fromHttpUrl(graphUrl + "/" + pageId)
+                .queryParam("fields", "instagram_business_account")
+                .queryParam("access_token", accessToken)
+                .build(false).toUriString();
+
+            JsonNode pageData = mapper.readTree(rest.getForEntity(igCheckUrl, String.class).getBody());
+            JsonNode igAccount = pageData.path("instagram_business_account");
+            if (!igAccount.isMissingNode() && igAccount.has("id")) {
+                String resolvedId = igAccount.path("id").asText();
+                log.info("[Reels] Resolved Instagram Business Account ID: " + resolvedId + " from page " + pageId);
+                return resolvedId;
+            }
+        }
+
+        // 3. Fallback to configured value
+        log.warning("[Reels] No Instagram Business Account linked to any Page. Falling back to configured ID: " + igUserId);
+        return igUserId;
+    }
+
     private String createContainer(String videoUrl, String caption) throws Exception {
+        String resolvedIgId = resolveIgUserId();
         String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + igUserId + "/media")
+            .fromHttpUrl(graphUrl + "/" + resolvedIgId + "/media")
             .queryParam("media_type", "REELS")
             .queryParam("video_url", videoUrl)
             .queryParam("caption", caption)
@@ -139,8 +221,9 @@ public class InstagramReelsService {
     }
 
     private String publishContainer(String containerId) throws Exception {
+        String resolvedIgId = resolveIgUserId();
         String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + igUserId + "/media_publish")
+            .fromHttpUrl(graphUrl + "/" + resolvedIgId + "/media_publish")
             .queryParam("creation_id", containerId)
             .queryParam("access_token", accessToken)
             .build(false).toUriString();

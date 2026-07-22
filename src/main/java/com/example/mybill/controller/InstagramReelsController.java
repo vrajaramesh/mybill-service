@@ -70,4 +70,18 @@ public class InstagramReelsController {
             )))
             .orElse(ResponseEntity.notFound().build());
     }
+
+    /**
+     * GET /api/instagram/reels/debug
+     * Diagnoses token access — shows which Facebook Pages and Instagram accounts are accessible.
+     */
+    @GetMapping("/debug")
+    public ResponseEntity<?> debug() {
+        try {
+            Map<String, Object> result = reelsService.debugTokenAccess();
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
 }
