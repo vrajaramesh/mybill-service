@@ -114,17 +114,18 @@ public class InstagramReelsService {
             String videoUrl = creatomateService.renderSlideshow(imageUrls);
             log.info("[Reels] Video rendered: " + videoUrl);
 
-            // 3. Create Instagram media container
+            // 3. Create Instagram media container (resolves Page Access Token once)
             update(jobId, "uploading", "Uploading video to Instagram...", null, videoUrl);
-            String containerId = createContainer(videoUrl, caption);
+            IgContext ctx = resolveIgContext();
+            String containerId = createContainer(videoUrl, caption, ctx);
             log.info("[Reels] Container created: " + containerId);
 
             // 4. Wait for container FINISHED
-            waitForContainer(containerId);
+            waitForContainer(containerId, ctx);
 
             // 5. Publish
             update(jobId, "publishing", "Publishing Reel...", null, videoUrl);
-            String postId = publishContainer(containerId);
+            String postId = publishContainer(containerId, ctx);
             log.info("[Reels] Published! Post ID: " + postId);
 
             jobs.put(jobId, new ReelsJobStatus(jobId, "done", "Reel published successfully!", postId, videoUrl));
@@ -139,59 +140,59 @@ public class InstagramReelsService {
 
     // ── Instagram Graph API ───────────────────────────────────────────────────
 
+    private record IgContext(String igUserId, String pageToken) {}
+
     /**
-     * Resolves the Instagram Business Account ID linked to the token's Facebook Pages.
-     * This avoids hardcoding the IG user ID (which differs from the Business Suite asset ID).
+     * Resolves the Instagram Business Account ID AND the Page Access Token from /me/accounts.
+     * Instagram publishing requires the Page Access Token, not the User/System token directly.
      */
-    private String resolveIgUserId() throws Exception {
-        // 1. Get Facebook Pages the token can manage
+    private IgContext resolveIgContext() throws Exception {
         String pagesUrl = UriComponentsBuilder
             .fromHttpUrl(graphUrl + "/me/accounts")
             .queryParam("access_token", accessToken)
             .build(false).toUriString();
 
         JsonNode pages = mapper.readTree(rest.getForEntity(pagesUrl, String.class).getBody());
-        log.info("[Reels] Pages response: " + pages.toString().substring(0, Math.min(500, pages.toString().length())));
+        log.info("[Reels] Pages response: " + pages.toString().substring(0, Math.min(300, pages.toString().length())));
 
         if (pages.has("error"))
             throw new RuntimeException("Could not fetch pages: " + pages.path("error").path("message").asText());
 
         JsonNode pageList = pages.path("data");
         if (!pageList.isArray() || pageList.isEmpty())
-            throw new RuntimeException("No Facebook Pages found for this token. Make sure the token has pages_show_list permission.");
+            throw new RuntimeException("No Facebook Pages found for this token.");
 
-        // 2. For each page, look for a linked Instagram Business Account
         for (JsonNode page : pageList) {
-            String pageId = page.path("id").asText();
+            String pageId        = page.path("id").asText();
+            String pageToken     = page.path("access_token").asText();
+
             String igCheckUrl = UriComponentsBuilder
                 .fromHttpUrl(graphUrl + "/" + pageId)
                 .queryParam("fields", "instagram_business_account")
-                .queryParam("access_token", accessToken)
+                .queryParam("access_token", pageToken)
                 .build(false).toUriString();
 
-            JsonNode pageData = mapper.readTree(rest.getForEntity(igCheckUrl, String.class).getBody());
+            JsonNode pageData  = mapper.readTree(rest.getForEntity(igCheckUrl, String.class).getBody());
             JsonNode igAccount = pageData.path("instagram_business_account");
             if (!igAccount.isMissingNode() && igAccount.has("id")) {
-                String resolvedId = igAccount.path("id").asText();
-                log.info("[Reels] Resolved Instagram Business Account ID: " + resolvedId + " from page " + pageId);
-                return resolvedId;
+                String igId = igAccount.path("id").asText();
+                log.info("[Reels] Resolved ig-user-id=" + igId + " pageToken present=" + !pageToken.isBlank());
+                return new IgContext(igId, pageToken);
             }
         }
 
-        // 3. Fallback to configured value
-        log.warning("[Reels] No Instagram Business Account linked to any Page. Falling back to configured ID: " + igUserId);
-        return igUserId;
+        log.warning("[Reels] No linked Instagram Business Account found. Falling back to config.");
+        return new IgContext(igUserId, accessToken);
     }
 
-    private String createContainer(String videoUrl, String caption) throws Exception {
-        String resolvedIgId = resolveIgUserId();
+    private String createContainer(String videoUrl, String caption, IgContext ctx) throws Exception {
         String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + resolvedIgId + "/media")
+            .fromHttpUrl(graphUrl + "/" + ctx.igUserId() + "/media")
             .queryParam("media_type", "REELS")
             .queryParam("video_url", videoUrl)
             .queryParam("caption", caption)
             .queryParam("share_to_feed", "true")
-            .queryParam("access_token", accessToken)
+            .queryParam("access_token", ctx.pageToken())
             .build(false).toUriString();
 
         ResponseEntity<String> response = rest.postForEntity(url, null, String.class);
@@ -201,13 +202,13 @@ public class InstagramReelsService {
         return body.path("id").asText();
     }
 
-    private void waitForContainer(String containerId) throws Exception {
+    private void waitForContainer(String containerId, IgContext ctx) throws Exception {
         for (int i = 0; i < 24; i++) {
             Thread.sleep(5000);
             String url = UriComponentsBuilder
                 .fromHttpUrl(graphUrl + "/" + containerId)
                 .queryParam("fields", "status_code,status")
-                .queryParam("access_token", accessToken)
+                .queryParam("access_token", ctx.pageToken())
                 .build(false).toUriString();
 
             JsonNode body = mapper.readTree(rest.getForEntity(url, String.class).getBody());
@@ -220,12 +221,11 @@ public class InstagramReelsService {
         throw new RuntimeException("Instagram container timed out");
     }
 
-    private String publishContainer(String containerId) throws Exception {
-        String resolvedIgId = resolveIgUserId();
+    private String publishContainer(String containerId, IgContext ctx) throws Exception {
         String url = UriComponentsBuilder
-            .fromHttpUrl(graphUrl + "/" + resolvedIgId + "/media_publish")
+            .fromHttpUrl(graphUrl + "/" + ctx.igUserId() + "/media_publish")
             .queryParam("creation_id", containerId)
-            .queryParam("access_token", accessToken)
+            .queryParam("access_token", ctx.pageToken())
             .build(false).toUriString();
 
         JsonNode body = mapper.readTree(rest.postForEntity(url, null, String.class).getBody());
