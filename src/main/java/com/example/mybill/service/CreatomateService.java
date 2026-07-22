@@ -34,10 +34,7 @@ public class CreatomateService {
 
         ObjectNode modifications = mapper.createObjectNode();
         for (int i = 0; i < Math.min(imageUrls.size(), 5); i++) {
-            ObjectNode imgNode = mapper.createObjectNode();
-            imgNode.put("source", imageUrls.get(i));
-            imgNode.put("fit",    "cover");
-            modifications.set("Image-" + (i + 1), imgNode);
+            modifications.put("Image-" + (i + 1), imageUrls.get(i));
         }
 
         ObjectNode payload = mapper.createObjectNode();
