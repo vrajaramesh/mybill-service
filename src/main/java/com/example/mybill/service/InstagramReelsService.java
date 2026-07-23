@@ -130,7 +130,7 @@ public class InstagramReelsService {
             // 3. Create Instagram media container (resolves Page Access Token once)
             update(jobId, "uploading", "Uploading video to Instagram...", null, videoUrl);
             IgContext ctx = resolveIgContext();
-            String containerId = createContainer(videoUrl, caption, ctx);
+            String containerId = createContainer(videoUrl, caption, title, ctx);
             log.info("[Reels] Container created: " + containerId);
 
             // 4. Wait for container FINISHED
@@ -198,7 +198,7 @@ public class InstagramReelsService {
         return new IgContext(igUserId, accessToken);
     }
 
-    private String createContainer(String videoUrl, String caption, IgContext ctx) throws Exception {
+    private String createContainer(String videoUrl, String caption, String reelTitle, IgContext ctx) throws Exception {
         // Instagram requires POST params in the request body (form-encoded), not as URL query params
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -207,6 +207,8 @@ public class InstagramReelsService {
         form.add("media_type",    "REELS");
         form.add("video_url",     videoUrl);
         form.add("caption",       caption != null ? caption : "");
+        if (reelTitle != null && !reelTitle.isBlank())
+            form.add("title", reelTitle);
         form.add("share_to_feed", "true");
         form.add("access_token",  ctx.pageToken());
 
