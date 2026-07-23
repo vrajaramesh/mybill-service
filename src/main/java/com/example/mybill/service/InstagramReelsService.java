@@ -1,5 +1,6 @@
 package com.example.mybill.service;
 
+import com.example.mybill.dto.Product;
 import com.example.mybill.multitenancy.TenantContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -27,6 +28,7 @@ public class InstagramReelsService {
     @Autowired private ProductService productService;
     @Autowired private ProductMarketingContentRepository marketingContentRepo;
     @Autowired private FFmpegVideoService ffmpegVideoService;
+    @Autowired private HashtagGeneratorService hashtagGeneratorService;
 
     private static final Logger log = Logger.getLogger(InstagramReelsService.class.getName());
     private final ObjectMapper mapper = new ObjectMapper();
@@ -115,7 +117,9 @@ public class InstagramReelsService {
                     .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
                     .orElse(productName);
             }
-            String caption = appendViralTags(baseCaption, productName);
+            Product product = productOpt.orElse(null);
+            String dynamicTags = hashtagGeneratorService.generateHashtags(product);
+            String caption = baseCaption.isBlank() ? dynamicTags : baseCaption + "\n\n" + dynamicTags;
 
             // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
             update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);
@@ -249,22 +253,6 @@ public class InstagramReelsService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    // Curated viral hashtags for Indian saree / fabric Reels
-    private static final String VIRAL_HASHTAGS =
-        "#reelsindia #reelsinstagram #trending #viral #explore #explorepage " +
-        "#saree #sareelove #sareecollection #sareestyle #sareeaddict #sareeswag " +
-        "#handloomsaree #handloom #indianhandloom #weavingart #fabriclove #textileart " +
-        "#indianwear #ethnicwear #indianfashion #ethniclook #ethnicstyle " +
-        "#bridalsaree #weddingwear #festivewear #partywear " +
-        "#srisafabrics #hyderabadfashion #boutiqueshopping #newarrival " +
-        "#sareenotsorry #6yards #ootd #instafashion";
-
-    // Words too generic to turn into product-specific tags
-    private static final Set<String> SKIP_WORDS = Set.of(
-        "big", "small", "the", "and", "for", "new", "old", "with",
-        "border", "design", "print", "color", "colour"
-    );
-
     private String buildCaption(String instagramCaption, String hashtags) {
         StringBuilder sb = new StringBuilder();
         if (instagramCaption != null && !instagramCaption.isBlank()) sb.append(instagramCaption.trim());
@@ -273,28 +261,6 @@ public class InstagramReelsService {
             sb.append(hashtags.trim());
         }
         return sb.isEmpty() ? null : sb.toString();
-    }
-
-    /**
-     * Appends VIRAL_HASHTAGS + product-specific tags to a caption.
-     * Skips any tag already present (case-insensitive).
-     */
-    private String appendViralTags(String caption, String productName) {
-        String base = caption != null ? caption.trim() : "";
-
-        // Build product-specific tags from the product name (e.g. "NARAYANAPET SILK" → #narayanapet #silk)
-        StringBuilder productTags = new StringBuilder();
-        if (productName != null) {
-            for (String word : productName.split("[\\s\\-_,]+")) {
-                String tag = word.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
-                if (tag.length() > 3 && !SKIP_WORDS.contains(tag) && !base.toLowerCase().contains("#" + tag)) {
-                    productTags.append("#").append(tag).append(" ");
-                }
-            }
-        }
-
-        String extra = (productTags + VIRAL_HASHTAGS).trim();
-        return base.isEmpty() ? extra : base + "\n\n" + extra;
     }
 
     private void update(String jobId, String status, String message, String postId, String videoUrl) {
