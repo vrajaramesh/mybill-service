@@ -28,10 +28,8 @@ public class FFmpegVideoService {
     private static final int WIDTH  = 1080;
     private static final int HEIGHT = 1920;
     private static final int FPS    = 30;
-    // Each slide duration in seconds (matches Creatomate template)
+    // Each slide duration in seconds
     private static final double SLIDE_DURATION = 3.8;
-    // Ken Burns: zoom from 100% to 115% over slide duration
-    private static final double ZOOM_END = 1.15;
 
     /**
      * Generates a high-quality 1080x1920 MP4 slideshow from the given image URLs,
@@ -72,11 +70,6 @@ public class FFmpegVideoService {
         int n            = images.size();
         double totalSecs = n * SLIDE_DURATION;
 
-        // 1.15x dimensions — image is pre-scaled to this, then progressively cropped
-        // to simulate Ken Burns zoom-in (100% → 115%) without zoompan's memory cost
-        int scaledW = (int) (WIDTH  * ZOOM_END); // 1242
-        int scaledH = (int) (HEIGHT * ZOOM_END); // 2208
-
         List<String> cmd = new ArrayList<>();
         cmd.add("ffmpeg");
         cmd.add("-y");
@@ -91,30 +84,16 @@ public class FFmpegVideoService {
         StringBuilder fc = new StringBuilder();
 
         for (int i = 0; i < n; i++) {
-            // Alternate zoom direction per slide for a true Ken Burns effect:
-            //   Even slides: zoom IN  (100% → 115%) — crop window shrinks over time
-            //   Odd  slides: zoom OUT (115% → 100%) — crop window grows over time
-            boolean zoomIn = (i % 2 == 0);
-            String wExpr = zoomIn
-                ? scaledW + "/(1+0.15*min(t/3.72\\,1))"
-                : scaledW + "/(1+0.15*(1-min(t/3.72\\,1)))";
-            String hExpr = zoomIn
-                ? scaledH + "/(1+0.15*min(t/3.72\\,1))"
-                : scaledH + "/(1+0.15*(1-min(t/3.72\\,1)))";
-
+            // Contain fit: scale to fit within 1080x1920, pad black bars to fill frame.
+            // Shows the full product photo without any cropping or zoom.
             fc.append(String.format(
                 "[%d:v]" +
-                "scale=%d:%d:force_original_aspect_ratio=increase:flags=lanczos," +
-                "crop=%d:%d:(iw-%d)/2:(ih-%d)/2," +
-                "setpts=PTS-STARTPTS," +
-                "crop=w='%s':h='%s':x='(iw-ow)/2':y='(ih-oh)/2'," +
-                "scale=%d:%d:flags=lanczos," +
+                "scale=%d:%d:force_original_aspect_ratio=decrease:flags=lanczos," +
+                "pad=%d:%d:(ow-iw)/2:(oh-ih)/2:color=black," +
                 "format=yuv420p," +
                 "setpts=PTS-STARTPTS[v%d];",
                 i,
-                scaledW, scaledH,
-                scaledW, scaledH, scaledW, scaledH,
-                wExpr, hExpr,
+                WIDTH, HEIGHT,
                 WIDTH, HEIGHT,
                 i
             ));
