@@ -102,6 +102,7 @@ public class InstagramReelsService {
     @Async
     public void publishAsync(String jobId, Integer productId, List<String> imageUrls, String title, String schema) {
         TenantContext.setCurrentTenant(schema);
+        log.info("[Reels] publishAsync start — jobId=" + jobId + " title=" + title);
         try {
             // 1. Build caption — use user-supplied title if provided, else Hermes auto-caption
             String productName = "New Arrival";

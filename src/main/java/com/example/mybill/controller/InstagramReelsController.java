@@ -9,12 +9,14 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 @RestController
 @RequestMapping("/api/instagram/reels")
 public class InstagramReelsController {
 
     @Autowired private InstagramReelsService reelsService;
+    private static final Logger log = Logger.getLogger(InstagramReelsController.class.getName());
 
     /**
      * POST /api/instagram/reels/publish
@@ -44,6 +46,7 @@ public class InstagramReelsController {
             return ResponseEntity.badRequest().body(Map.of("error", "Exactly 5 images are required"));
 
         String title  = body.containsKey("title") ? body.get("title").toString() : null;
+        log.info("[Reels] publish request — productId=" + productId + " images=" + imageUrls.size() + " title=" + title);
         String schema = TenantContext.getCurrentTenant();
         String jobId  = reelsService.publish(productId, imageUrls, title, schema);
 
