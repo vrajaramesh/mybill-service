@@ -48,10 +48,10 @@ public class InstagramReelsService {
      * Starts async Reel creation from explicit image URLs + a product for caption.
      * Returns a jobId immediately.
      */
-    public String publish(Integer productId, List<String> imageUrls, String schema) {
+    public String publish(Integer productId, List<String> imageUrls, String title, String schema) {
         String jobId = UUID.randomUUID().toString();
         jobs.put(jobId, new ReelsJobStatus(jobId, "queued", "Job queued", null, null));
-        publishAsync(jobId, productId, imageUrls, schema);
+        publishAsync(jobId, productId, imageUrls, title, schema);
         return jobId;
     }
 
@@ -99,17 +99,22 @@ public class InstagramReelsService {
     // ── Async orchestration ───────────────────────────────────────────────────
 
     @Async
-    public void publishAsync(String jobId, Integer productId, List<String> imageUrls, String schema) {
+    public void publishAsync(String jobId, Integer productId, List<String> imageUrls, String title, String schema) {
         TenantContext.setCurrentTenant(schema);
         try {
-            // 1. Build caption from Hermes content
+            // 1. Build caption — use user-supplied title if provided, else Hermes auto-caption
             String productName = "New Arrival";
             Optional<Product> productOpt = productService.getProductById(productId);
             if (productOpt.isPresent()) productName = productOpt.get().getProductName();
 
-            String caption = marketingContentRepo.findById(productId)
-                .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
-                .orElse(productName + "\n\n#srisafabrics #fashion #fabric #saree");
+            String caption;
+            if (title != null && !title.isBlank()) {
+                caption = title;
+            } else {
+                caption = marketingContentRepo.findById(productId)
+                    .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
+                    .orElse(productName + "\n\n#srisafabrics #fashion #fabric #saree");
+            }
 
             // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
             update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);

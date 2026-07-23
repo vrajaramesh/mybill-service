@@ -43,8 +43,9 @@ public class InstagramReelsController {
         if (imageUrls.size() != 5)
             return ResponseEntity.badRequest().body(Map.of("error", "Exactly 5 images are required"));
 
+        String title  = body.containsKey("title") ? body.get("title").toString() : null;
         String schema = TenantContext.getCurrentTenant();
-        String jobId  = reelsService.publish(productId, imageUrls, schema);
+        String jobId  = reelsService.publish(productId, imageUrls, title, schema);
 
         return ResponseEntity.accepted().body(Map.of(
             "jobId",      jobId,
