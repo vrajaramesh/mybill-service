@@ -1,6 +1,5 @@
 package com.example.mybill.service;
 
-import com.example.mybill.dto.Product;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 

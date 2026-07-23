@@ -1,4 +1,4 @@
-package com.example.mybill.dto;
+package com.example.mybill.service;
 
 import jakarta.persistence.*;
 import java.math.BigDecimal;
