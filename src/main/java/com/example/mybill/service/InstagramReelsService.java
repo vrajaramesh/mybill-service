@@ -118,8 +118,9 @@ public class InstagramReelsService {
                     .orElse(productName);
             }
             Product product = productOpt.orElse(null);
-            String dynamicTags = hashtagGeneratorService.generateHashtags(product);
+            String dynamicTags = hashtagGeneratorService.generateHashtags(product, title);
             String caption = baseCaption.isBlank() ? dynamicTags : baseCaption + "\n\n" + dynamicTags;
+            log.info("[Reels] Caption to post: " + caption.substring(0, Math.min(200, caption.length())));
 
             // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
             update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);

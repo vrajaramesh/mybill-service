@@ -45,9 +45,14 @@ public class HashtagGeneratorService {
      * Falls back to a static set if the API call fails.
      */
     public String generateHashtags(Product product) {
+        return generateHashtags(product, null);
+    }
+
+    public String generateHashtags(Product product, String customTitle) {
         try {
-            String userPrompt = buildPrompt(product);
-            log.info("[Hashtags] Generating tags for: " + (product != null ? product.getProductName() : "unknown"));
+            String userPrompt = buildPrompt(product, customTitle);
+            log.info("[Hashtags] Generating tags for: " + (product != null ? product.getProductName() : "unknown")
+                + (customTitle != null && !customTitle.isBlank() ? " | title: " + customTitle : ""));
             String result = claudeService.complete(SYSTEM_PROMPT, userPrompt);
             String tags = extractHashtags(result);
             log.info("[Hashtags] Generated: " + tags);
@@ -58,9 +63,12 @@ public class HashtagGeneratorService {
         }
     }
 
-    private String buildPrompt(Product product) {
+    private String buildPrompt(Product product, String customTitle) {
         StringBuilder sb = new StringBuilder();
         sb.append("Generate trending Instagram hashtags for this fabric product:\n\n");
+
+        if (customTitle != null && !customTitle.isBlank())
+            sb.append("Reel caption/title (user-provided): ").append(customTitle).append("\n");
 
         if (product != null) {
             sb.append("Product name: ").append(product.getProductName()).append("\n");
