@@ -130,6 +130,9 @@ public class InstagramReelsService {
             // 3. Create Instagram media container (resolves Page Access Token once)
             update(jobId, "uploading", "Uploading video to Instagram...", null, videoUrl);
             IgContext ctx = resolveIgContext();
+            log.info("[Reels] Submitting caption='" +
+                caption.substring(0, Math.min(120, caption.length())).replace("\n", "\\n") +
+                "' title='" + title + "'");
             String containerId = createContainer(videoUrl, caption, title, ctx);
             log.info("[Reels] Container created: " + containerId);
 
@@ -141,7 +144,8 @@ public class InstagramReelsService {
             String postId = publishContainer(containerId, ctx);
             log.info("[Reels] Published! Post ID: " + postId);
 
-            jobs.put(jobId, new ReelsJobStatus(jobId, "done", "Reel published successfully!", postId, videoUrl));
+            String preview = caption.substring(0, Math.min(80, caption.length())).replace("\n", " ");
+            jobs.put(jobId, new ReelsJobStatus(jobId, "done", "Published! Caption: " + preview, postId, videoUrl));
 
         } catch (Exception e) {
             log.warning("[Reels] Job " + jobId + " failed: " + e.getMessage());
