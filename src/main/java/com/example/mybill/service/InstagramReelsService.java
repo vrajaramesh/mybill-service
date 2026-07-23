@@ -107,14 +107,15 @@ public class InstagramReelsService {
             Optional<Product> productOpt = productService.getProductById(productId);
             if (productOpt.isPresent()) productName = productOpt.get().getProductName();
 
-            String caption;
+            String baseCaption;
             if (title != null && !title.isBlank()) {
-                caption = title;
+                baseCaption = title;
             } else {
-                caption = marketingContentRepo.findById(productId)
+                baseCaption = marketingContentRepo.findById(productId)
                     .map(mc -> buildCaption(mc.getInstagramCaption(), mc.getHashtags()))
-                    .orElse(productName + "\n\n#srisafabrics #fashion #fabric #saree");
+                    .orElse(productName);
             }
+            String caption = appendViralTags(baseCaption, productName);
 
             // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
             update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);
@@ -248,6 +249,22 @@ public class InstagramReelsService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    // Curated viral hashtags for Indian saree / fabric Reels
+    private static final String VIRAL_HASHTAGS =
+        "#reelsindia #reelsinstagram #trending #viral #explore #explorepage " +
+        "#saree #sareelove #sareecollection #sareestyle #sareeaddict #sareeswag " +
+        "#handloomsaree #handloom #indianhandloom #weavingart #fabriclove #textileart " +
+        "#indianwear #ethnicwear #indianfashion #ethniclook #ethnicstyle " +
+        "#bridalsaree #weddingwear #festivewear #partywear " +
+        "#srisafabrics #hyderabadfashion #boutiqueshopping #newarrival " +
+        "#sareenotsorry #6yards #ootd #instafashion";
+
+    // Words too generic to turn into product-specific tags
+    private static final Set<String> SKIP_WORDS = Set.of(
+        "big", "small", "the", "and", "for", "new", "old", "with",
+        "border", "design", "print", "color", "colour"
+    );
+
     private String buildCaption(String instagramCaption, String hashtags) {
         StringBuilder sb = new StringBuilder();
         if (instagramCaption != null && !instagramCaption.isBlank()) sb.append(instagramCaption.trim());
@@ -256,6 +273,28 @@ public class InstagramReelsService {
             sb.append(hashtags.trim());
         }
         return sb.isEmpty() ? null : sb.toString();
+    }
+
+    /**
+     * Appends VIRAL_HASHTAGS + product-specific tags to a caption.
+     * Skips any tag already present (case-insensitive).
+     */
+    private String appendViralTags(String caption, String productName) {
+        String base = caption != null ? caption.trim() : "";
+
+        // Build product-specific tags from the product name (e.g. "NARAYANAPET SILK" → #narayanapet #silk)
+        StringBuilder productTags = new StringBuilder();
+        if (productName != null) {
+            for (String word : productName.split("[\\s\\-_,]+")) {
+                String tag = word.replaceAll("[^a-zA-Z0-9]", "").toLowerCase();
+                if (tag.length() > 3 && !SKIP_WORDS.contains(tag) && !base.toLowerCase().contains("#" + tag)) {
+                    productTags.append("#").append(tag).append(" ");
+                }
+            }
+        }
+
+        String extra = (productTags + VIRAL_HASHTAGS).trim();
+        return base.isEmpty() ? extra : base + "\n\n" + extra;
     }
 
     private void update(String jobId, String status, String message, String postId, String videoUrl) {
