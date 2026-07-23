@@ -124,7 +124,7 @@ public class InstagramReelsService {
 
             // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
             update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);
-            String videoUrl = ffmpegVideoService.generateSlideshow(imageUrls, productName);
+            String videoUrl = ffmpegVideoService.generateSlideshow(imageUrls, productName, title);
             log.info("[Reels] Video rendered: " + videoUrl);
 
             // 3. Create Instagram media container (resolves Page Access Token once)

@@ -36,6 +36,10 @@ public class FFmpegVideoService {
      * uploads it to GCS, and returns the public GCS URL.
      */
     public String generateSlideshow(List<String> imageUrls, String productName) throws Exception {
+        return generateSlideshow(imageUrls, productName, null);
+    }
+
+    public String generateSlideshow(List<String> imageUrls, String productName, String displayTitle) throws Exception {
         Path tempDir = Files.createTempDirectory("reels-");
         try {
             // 1. Download images
@@ -51,9 +55,10 @@ public class FFmpegVideoService {
             Path musicPath = tempDir.resolve("music.mp3");
             download(http, MUSIC_URL, musicPath);
 
-            // 3. Run FFmpeg
+            // 3. Run FFmpeg — use user's title as on-video text if provided, else product name
+            String videoText = (displayTitle != null && !displayTitle.isBlank()) ? displayTitle : productName;
             Path output = tempDir.resolve("reel.mp4");
-            runFFmpeg(imagePaths, musicPath, output, productName);
+            runFFmpeg(imagePaths, musicPath, output, videoText);
 
             // 4. Upload to GCS and return URL
             byte[] videoBytes = Files.readAllBytes(output);
