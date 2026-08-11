@@ -28,8 +28,9 @@ public class SchemaMultiTenantConnectionProvider implements MultiTenantConnectio
     public Connection getConnection(String tenantIdentifier) throws SQLException {
         System.err.println("[TENANT] getConnection called with: " + tenantIdentifier);
         Connection connection = getAnyConnection();
+        // SET LOCAL is transaction-scoped — required for PgBouncer in transaction pooling mode
         connection.createStatement().execute(
-            "SET search_path TO \"" + tenantIdentifier + "\", public"
+            "SET LOCAL search_path TO \"" + tenantIdentifier + "\", public"
         );
         return connection;
     }
@@ -37,7 +38,7 @@ public class SchemaMultiTenantConnectionProvider implements MultiTenantConnectio
     @Override
     public void releaseConnection(String tenantIdentifier, Connection connection) throws SQLException {
         System.err.println("[TENANT] releaseConnection called with: " + tenantIdentifier);
-        connection.createStatement().execute("SET search_path TO public");
+        // No explicit reset needed — SET LOCAL is automatically rolled back when transaction ends
         releaseAnyConnection(connection);
     }
 
