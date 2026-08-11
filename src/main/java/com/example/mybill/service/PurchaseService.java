@@ -89,7 +89,10 @@ public class PurchaseService {
                 purchase.setFinalAmount(purchaseDetails.getFinalAmount());
             }
 
-            // Update payment status
+            // Update paid amount then recalculate payment status
+            if (purchaseDetails.getPaidAmount() != null) {
+                purchase.setPaidAmount(purchaseDetails.getPaidAmount());
+            }
             updatePaymentStatus(purchase);
 
             return purchaseRepository.save(purchase);
