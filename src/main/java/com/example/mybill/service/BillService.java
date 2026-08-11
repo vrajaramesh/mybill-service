@@ -24,10 +24,12 @@ public class BillService {
     @Autowired
     private ProductRepository productRepository;
 
+    @Transactional(readOnly = true)
     public List<Bill> getAllBills() {
         return billRepository.findAllOrderByCreatedAtDesc();
     }
 
+    @Transactional(readOnly = true)
     public Optional<Bill> getBillById(Integer id) {
         return billRepository.findById(id);
     }
