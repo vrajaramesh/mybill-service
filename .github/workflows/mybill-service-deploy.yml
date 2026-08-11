@@ -54,7 +54,7 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE }}:${{ github.sha }}
           env_vars: |
-            SPRING_DATASOURCE_URL=jdbc:postgresql://ep-mute-sun-amclpke1-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require
+            SPRING_DATASOURCE_URL=jdbc:postgresql://ep-mute-sun-amclpke1.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require
             SPRING_DATASOURCE_USERNAME=neondb_owner
             SPRING_DATASOURCE_PASSWORD=npg_xRC73OdBaqLH
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
