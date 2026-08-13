@@ -293,9 +293,9 @@ public class BusinessIntelligenceService {
 
         List<Map<String, Object>> allResults = new ArrayList<>();
         String[] queries = {
-            "trending saree fabric designs 2026 india instagram",
-            "trending fabric wholesale manufacturers india 2026",
-            "latest cotton silk fabric trends india supplier contact"
+            "trending fabric types wholesale india 2026 cotton silk georgette linen",
+            "trending dress material fabric wholesale manufacturers india 2026",
+            "latest fabric trends india garment industry supplier contact 2026"
         };
 
         for (String query : queries) {
@@ -335,9 +335,9 @@ public class BusinessIntelligenceService {
 
         List<Map<String, Object>> images = new ArrayList<>();
         String[] queries = {
-            "trending saree fabric india 2026 fashion",
-            "trending lehenga fabric wholesale india",
-            "silk cotton georgette fabric trend india latest"
+            "trending fabric rolls wholesale india 2026 cotton silk georgette",
+            "latest dress material fabric market india fashion 2026",
+            "trending linen chiffon crepe fabric india wholesale supplier"
         };
 
         for (String query : queries) {
@@ -424,13 +424,20 @@ public class BusinessIntelligenceService {
                                     Map<String, Object> expenses, Map<String, Object> enquiries,
                                     List<Map<String, Object>> trends, Map<String, Object> extraInput) {
         String systemPrompt = """
-            You are a senior business consultant specialising in Indian textile/fabric retail businesses.
-            Analyse the business data provided and give a comprehensive, actionable report.
+            You are a senior business consultant specialising in Indian fabric wholesale and retail businesses.
+            This business sells RAW FABRICS (cotton, silk, georgette, chiffon, linen, crepe, net, velvet,
+            brocade, etc.) — NOT finished garments or sarees. All analysis must focus on fabric types,
+            fabric quality, fabric pricing, and fabric market trends.
+            IMPORTANT: Completely EXCLUDE lining fabrics from all analysis, recommendations, dead stock
+            action plans, and trend sections. Lining fabrics are low-margin commodity items and are
+            not relevant to strategic business decisions.
             Be specific with numbers. Use INR (₹) for currency.
             Structure your response with clear markdown sections using ## headings.
             """;
 
         StringBuilder prompt = new StringBuilder();
+        prompt.append("**Note:** This is a fabric wholesale/retail business. Analyse fabric types only. ")
+              .append("Completely ignore and skip any lining fabric products in all sections.\n\n");
         prompt.append("## Business Data for Last 30 Days\n\n");
 
         prompt.append("### Sales Performance\n").append(formatMap(sales)).append("\n\n");
