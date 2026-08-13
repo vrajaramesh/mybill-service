@@ -30,7 +30,6 @@ public class BusinessIntelligenceService {
         .connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    @Transactional(readOnly = true)
     public Map<String, Object> generateReport(Map<String, Object> extraInput) {
         String schema = TenantContext.getCurrentTenant();
         if (schema == null) schema = "public";
@@ -128,7 +127,7 @@ public class BusinessIntelligenceService {
 
             return jdbcTemplate.queryForMap(
                 "SELECT COUNT(*) as total_purchases, " +
-                "COALESCE(SUM(final_price), 0) as total_amount, " +
+                "COALESCE(SUM(final_amount), 0) as total_amount, " +
                 "COALESCE(SUM(paid_amount), 0) as total_paid " +
                 "FROM \"" + schema + "\".purchases " +
                 "WHERE invoice_date >= ? AND invoice_date <= ?",
@@ -249,6 +248,50 @@ public class BusinessIntelligenceService {
         return allResults;
     }
 
+    private String getFestivalCalendar() {
+        LocalDate today = LocalDate.now();
+        int year = today.getYear();
+
+        // Approximate fixed/recurring festival dates (update year dynamically)
+        List<String[]> festivals = new ArrayList<>(List.of(
+            new String[]{"Onam",               year + "-09-05"},
+            new String[]{"Navratri/Durga Puja", year + "-10-02"},
+            new String[]{"Dussehra",            year + "-10-12"},
+            new String[]{"Diwali",              year + "-10-20"},
+            new String[]{"Bhai Dooj",           year + "-10-22"},
+            new String[]{"Christmas",           year + "-12-25"},
+            new String[]{"Pongal/Makar Sankranti", (year + 1) + "-01-14"},
+            new String[]{"Republic Day",        (year + 1) + "-01-26"},
+            new String[]{"Valentine's Day",     (year + 1) + "-02-14"},
+            new String[]{"Holi",                (year + 1) + "-03-14"},
+            new String[]{"Ugadi/Gudi Padwa",    (year + 1) + "-03-30"},
+            new String[]{"Eid-ul-Fitr",         (year + 1) + "-04-01"},
+            new String[]{"Akshaya Tritiya",     (year + 1) + "-04-28"},
+            new String[]{"Raksha Bandhan",      (year + 1) + "-08-09"},
+            new String[]{"Eid-ul-Adha",         (year + 1) + "-06-07"},
+            new String[]{"Independence Day",    (year + 1) + "-08-15"}
+        ));
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("### Upcoming Indian Festivals (next 6 months)\n");
+        sb.append("Today: ").append(today).append("\n\n");
+
+        LocalDate sixMonthsLater = today.plusMonths(6);
+        for (String[] f : festivals) {
+            try {
+                LocalDate fd = LocalDate.parse(f[1]);
+                if (!fd.isBefore(today) && !fd.isAfter(sixMonthsLater)) {
+                    long daysAway = java.time.temporal.ChronoUnit.DAYS.between(today, fd);
+                    LocalDate stockBy = fd.minusDays(30);
+                    sb.append("- **").append(f[0]).append("** (").append(fd)
+                      .append(", ").append(daysAway).append(" days away) — stock by ")
+                      .append(stockBy).append("\n");
+                }
+            } catch (Exception ignored) {}
+        }
+        return sb.toString();
+    }
+
     private String generateAiReport(Map<String, Object> sales, List<Map<String, Object>> topProducts,
                                     List<Map<String, Object>> deadStock, Map<String, Object> purchases,
                                     Map<String, Object> expenses, Map<String, Object> enquiries,
@@ -316,6 +359,8 @@ public class BusinessIntelligenceService {
             prompt.append("\n");
         }
 
+        prompt.append(getFestivalCalendar()).append("\n");
+
         prompt.append("""
             ---
             Based on the above data, provide:
@@ -344,8 +389,15 @@ public class BusinessIntelligenceService {
             ## 8. Trending Fabrics & Manufacturer Leads
             (Based on trend data, which fabrics to source and suggested manufacturers)
 
-            ## 9. Priority Action Items
-            (Top 5 things to do this week)
+            ## 9. Festival Forecasting & Advance Stocking Plan
+            For each upcoming festival listed above (within next 6 months), specify:
+            - Which fabric types and saree styles traditionally sell best for that festival
+            - Recommended stock quantities to procure 30 days before the festival
+            - Specific marketing actions to take 2 weeks before each festival
+            - Price points and offers that work well for each festival
+
+            ## 10. Priority Action Items
+            (Top 5 things to do THIS WEEK, ranked by impact)
             """);
 
         try {
