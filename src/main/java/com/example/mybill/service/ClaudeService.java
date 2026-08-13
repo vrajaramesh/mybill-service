@@ -68,6 +68,43 @@ public class ClaudeService {
     }
 
     /**
+     * Single-turn completion for Business Intelligence — same as complete() but with max_tokens=4000
+     * to accommodate the longer detailed reports.
+     */
+    public String completeBI(String systemPrompt, String userPrompt) {
+        try {
+            ObjectNode body = json.createObjectNode();
+            body.put("model",      MODEL);
+            body.put("max_tokens", 4000);
+            body.put("system",     systemPrompt);
+
+            ArrayNode messages = body.putArray("messages");
+            messages.addObject().put("role", "user").put("content", userPrompt);
+
+            HttpRequest req = HttpRequest.newBuilder()
+                .uri(URI.create(apiUrl))
+                .header("Content-Type",      "application/json")
+                .header("x-api-key",         apiKey)
+                .header("anthropic-version", API_VER)
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(body)))
+                .timeout(Duration.ofSeconds(120))
+                .build();
+
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200)
+                throw new RuntimeException("Claude API " + resp.statusCode() + ": " + resp.body());
+
+            return json.readTree(resp.body())
+                .path("content").get(0).path("text").asText();
+
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Claude completeBI failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * Send a chat turn to Claude with conversation history and matching products.
      * Returns Claude's reply text.
      */

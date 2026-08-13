@@ -196,6 +196,19 @@ public class SchemaColumnMigrationRunner implements ApplicationRunner {
             } catch (Exception e) {
                 System.err.println("[Migration] products ecom columns for schema " + s + ": " + e.getMessage());
             }
+            try {
+                jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS "%s".expenses (
+                        expense_id   SERIAL        PRIMARY KEY,
+                        expense_date DATE          NOT NULL,
+                        category     VARCHAR(50)   NOT NULL,
+                        description  VARCHAR(255),
+                        amount       NUMERIC(12,2) NOT NULL,
+                        created_at   TIMESTAMP     DEFAULT NOW()
+                    )""".formatted(s));
+            } catch (Exception e) {
+                System.err.println("[Migration] Could not create expenses table for schema " + s + ": " + e.getMessage());
+            }
         }
 
         // Ensure admin_firm_access table exists (idempotent)
