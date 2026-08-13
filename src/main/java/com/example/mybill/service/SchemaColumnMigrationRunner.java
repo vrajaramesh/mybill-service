@@ -209,6 +209,20 @@ public class SchemaColumnMigrationRunner implements ApplicationRunner {
             } catch (Exception e) {
                 System.err.println("[Migration] Could not create expenses table for schema " + s + ": " + e.getMessage());
             }
+            try {
+                jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS "%s".ai_reports (
+                        report_id    SERIAL      PRIMARY KEY,
+                        status       VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        extra_input  TEXT,
+                        report_json  TEXT,
+                        error_msg    TEXT,
+                        created_at   TIMESTAMP   DEFAULT NOW(),
+                        completed_at TIMESTAMP
+                    )""".formatted(s));
+            } catch (Exception e) {
+                System.err.println("[Migration] Could not create ai_reports table for schema " + s + ": " + e.getMessage());
+            }
         }
 
         // Ensure admin_firm_access table exists (idempotent)

@@ -7,7 +7,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -16,6 +15,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 @Service
 public class BusinessIntelligenceService {
@@ -30,36 +30,116 @@ public class BusinessIntelligenceService {
         .connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper mapper = new ObjectMapper();
 
-    public Map<String, Object> generateReport(Map<String, Object> extraInput) {
+    // ─── Public API ────────────────────────────────────────────────────────────
+
+    /** Creates a PENDING row and fires off async generation. Returns {reportId, status} immediately. */
+    public Map<String, Object> startReport(Map<String, Object> extraInput) {
         String schema = TenantContext.getCurrentTenant();
         if (schema == null) schema = "public";
+        ensureAiReportsTable(schema);
 
+        String extraJson = "{}";
+        try { extraJson = mapper.writeValueAsString(extraInput != null ? extraInput : Map.of()); }
+        catch (Exception ignored) {}
+
+        Long reportId = jdbcTemplate.queryForObject(
+            "INSERT INTO \"" + schema + "\".ai_reports (status, extra_input) VALUES ('PENDING', ?) RETURNING report_id",
+            Long.class, extraJson
+        );
+
+        final String schemaFinal = schema;
+        final long reportIdFinal = reportId;
+        final Map<String, Object> extraFinal = extraInput != null ? extraInput : Map.of();
+
+        CompletableFuture.runAsync(() -> runGeneration(reportIdFinal, schemaFinal, extraFinal));
+
+        return Map.of("reportId", reportId, "status", "PENDING");
+    }
+
+    /** Poll endpoint — returns status + full report data when DONE. */
+    public Map<String, Object> getReport(long reportId, String schema) {
+        if (schema == null) schema = "public";
+        try {
+            Map<String, Object> row = jdbcTemplate.queryForMap(
+                "SELECT report_id, status, error_msg, report_json FROM \"" + schema + "\".ai_reports WHERE report_id=?",
+                reportId
+            );
+            return buildResponse(row);
+        } catch (Exception e) {
+            return Map.of("reportId", reportId, "status", "NOT_FOUND");
+        }
+    }
+
+    /** Returns the most recent report (any status) for this tenant. */
+    public Map<String, Object> getLatestReport(String schema) {
+        if (schema == null) schema = "public";
+        try {
+            ensureAiReportsTable(schema);
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT report_id, status, error_msg, report_json FROM \"" + schema + "\".ai_reports ORDER BY created_at DESC LIMIT 1"
+            );
+            if (rows.isEmpty()) return Map.of("status", "NONE");
+            return buildResponse(rows.get(0));
+        } catch (Exception e) {
+            return Map.of("status", "NONE");
+        }
+    }
+
+    // ─── Async generation (runs in background thread) ──────────────────────────
+
+    private void runGeneration(long reportId, String schema, Map<String, Object> extraInput) {
+        try {
+            jdbcTemplate.update(
+                "UPDATE \"" + schema + "\".ai_reports SET status='PROCESSING' WHERE report_id=?", reportId
+            );
+
+            Map<String, Object> result = doGenerateReport(schema, extraInput);
+            String resultJson = mapper.writeValueAsString(result);
+
+            jdbcTemplate.update(
+                "UPDATE \"" + schema + "\".ai_reports SET status='DONE', report_json=?, completed_at=NOW() WHERE report_id=?",
+                resultJson, reportId
+            );
+        } catch (Exception e) {
+            String msg = e.getMessage() != null ? e.getMessage().substring(0, Math.min(500, e.getMessage().length())) : "Unknown error";
+            try {
+                jdbcTemplate.update(
+                    "UPDATE \"" + schema + "\".ai_reports SET status='FAILED', error_msg=?, completed_at=NOW() WHERE report_id=?",
+                    msg, reportId
+                );
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private Map<String, Object> doGenerateReport(String schema, Map<String, Object> extraInput) {
         LocalDate today = LocalDate.now();
         LocalDate thirtyDaysAgo = today.minusDays(30);
 
-        Map<String, Object> salesSummary = getSalesSummary(schema, thirtyDaysAgo, today);
+        Map<String, Object> salesSummary    = getSalesSummary(schema, thirtyDaysAgo, today);
         List<Map<String, Object>> topProducts = getTopProducts(schema, thirtyDaysAgo, today);
-        List<Map<String, Object>> deadStock = getDeadStock(schema, thirtyDaysAgo, today);
-        Map<String, Object> purchaseSummary = getPurchaseSummary(schema, thirtyDaysAgo, today);
-        Map<String, Object> expenseSummary = getExpenseSummary(schema, thirtyDaysAgo, today);
-        Map<String, Object> enquiryData = getEnquiryData(schema, thirtyDaysAgo, today);
-        List<Map<String, Object>> trends = getInstagramTrends();
+        List<Map<String, Object>> deadStock   = getDeadStock(schema, thirtyDaysAgo, today);
+        Map<String, Object> purchaseSummary  = getPurchaseSummary(schema, thirtyDaysAgo, today);
+        Map<String, Object> expenseSummary   = getExpenseSummary(schema, thirtyDaysAgo, today);
+        Map<String, Object> enquiryData      = getEnquiryData(schema, thirtyDaysAgo, today);
+        List<Map<String, Object>> trends     = getInstagramTrends();
 
-        String report = generateAiReport(salesSummary, topProducts, deadStock,
+        String aiReport = generateAiReport(salesSummary, topProducts, deadStock,
             purchaseSummary, expenseSummary, enquiryData, trends, extraInput);
 
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("salesSummary", salesSummary);
-        result.put("topProducts", topProducts);
-        result.put("deadStock", deadStock);
+        result.put("salesSummary",    salesSummary);
+        result.put("topProducts",     topProducts);
+        result.put("deadStock",       deadStock);
         result.put("purchaseSummary", purchaseSummary);
-        result.put("expenseSummary", expenseSummary);
-        result.put("enquiryData", enquiryData);
+        result.put("expenseSummary",  expenseSummary);
+        result.put("enquiryData",     enquiryData);
         result.put("trendingFabrics", trends);
-        result.put("aiReport", report);
-        result.put("generatedAt", today.toString());
+        result.put("aiReport",        aiReport);
+        result.put("generatedAt",     today.toString());
         return result;
     }
+
+    // ─── DB queries ────────────────────────────────────────────────────────────
 
     private Map<String, Object> getSalesSummary(String schema, LocalDate from, LocalDate to) {
         try {
@@ -206,7 +286,7 @@ public class BusinessIntelligenceService {
 
     public List<Map<String, Object>> getInstagramTrends() {
         if (serpApiKey == null || serpApiKey.isBlank()) {
-            return List.of(Map.of("note", "SerpAPI key not configured. Add SERP_API_KEY env var to enable Instagram trend analysis."));
+            return List.of(Map.of("note", "SerpAPI key not configured."));
         }
 
         List<Map<String, Object>> allResults = new ArrayList<>();
@@ -234,49 +314,49 @@ public class BusinessIntelligenceService {
                 if (organic.isArray()) {
                     for (JsonNode item : organic) {
                         Map<String, Object> r = new LinkedHashMap<>();
-                        r.put("title", item.path("title").asText());
+                        r.put("title",   item.path("title").asText());
                         r.put("snippet", item.path("snippet").asText());
-                        r.put("link", item.path("link").asText());
-                        r.put("query", query);
+                        r.put("link",    item.path("link").asText());
+                        r.put("query",   query);
                         allResults.add(r);
                     }
                 }
             } catch (Exception e) {
-                allResults.add(Map.of("error", "SerpAPI query failed: " + e.getMessage(), "query", query));
+                allResults.add(Map.of("error", "SerpAPI failed: " + e.getMessage(), "query", query));
             }
         }
         return allResults;
     }
 
+    // ─── AI prompt ─────────────────────────────────────────────────────────────
+
     private String getFestivalCalendar() {
         LocalDate today = LocalDate.now();
         int year = today.getYear();
 
-        // Approximate fixed/recurring festival dates (update year dynamically)
         List<String[]> festivals = new ArrayList<>(List.of(
-            new String[]{"Onam",               year + "-09-05"},
-            new String[]{"Navratri/Durga Puja", year + "-10-02"},
-            new String[]{"Dussehra",            year + "-10-12"},
-            new String[]{"Diwali",              year + "-10-20"},
-            new String[]{"Bhai Dooj",           year + "-10-22"},
-            new String[]{"Christmas",           year + "-12-25"},
-            new String[]{"Pongal/Makar Sankranti", (year + 1) + "-01-14"},
-            new String[]{"Republic Day",        (year + 1) + "-01-26"},
-            new String[]{"Valentine's Day",     (year + 1) + "-02-14"},
-            new String[]{"Holi",                (year + 1) + "-03-14"},
-            new String[]{"Ugadi/Gudi Padwa",    (year + 1) + "-03-30"},
-            new String[]{"Eid-ul-Fitr",         (year + 1) + "-04-01"},
-            new String[]{"Akshaya Tritiya",     (year + 1) + "-04-28"},
-            new String[]{"Raksha Bandhan",      (year + 1) + "-08-09"},
-            new String[]{"Eid-ul-Adha",         (year + 1) + "-06-07"},
-            new String[]{"Independence Day",    (year + 1) + "-08-15"}
+            new String[]{"Onam",                    year + "-09-05"},
+            new String[]{"Navratri/Durga Puja",      year + "-10-02"},
+            new String[]{"Dussehra",                 year + "-10-12"},
+            new String[]{"Diwali",                   year + "-10-20"},
+            new String[]{"Bhai Dooj",                year + "-10-22"},
+            new String[]{"Christmas",                year + "-12-25"},
+            new String[]{"Pongal/Makar Sankranti",  (year + 1) + "-01-14"},
+            new String[]{"Republic Day",            (year + 1) + "-01-26"},
+            new String[]{"Valentine's Day",         (year + 1) + "-02-14"},
+            new String[]{"Holi",                    (year + 1) + "-03-14"},
+            new String[]{"Ugadi/Gudi Padwa",        (year + 1) + "-03-30"},
+            new String[]{"Eid-ul-Fitr",             (year + 1) + "-04-01"},
+            new String[]{"Akshaya Tritiya",         (year + 1) + "-04-28"},
+            new String[]{"Eid-ul-Adha",             (year + 1) + "-06-07"},
+            new String[]{"Raksha Bandhan",          (year + 1) + "-08-09"},
+            new String[]{"Independence Day",        (year + 1) + "-08-15"}
         ));
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("### Upcoming Indian Festivals (next 6 months)\n");
+        StringBuilder sb = new StringBuilder("### Upcoming Indian Festivals (next 6 months)\n");
         sb.append("Today: ").append(today).append("\n\n");
-
         LocalDate sixMonthsLater = today.plusMonths(6);
+
         for (String[] f : festivals) {
             try {
                 LocalDate fd = LocalDate.parse(f[1]);
@@ -306,34 +386,26 @@ public class BusinessIntelligenceService {
         StringBuilder prompt = new StringBuilder();
         prompt.append("## Business Data for Last 30 Days\n\n");
 
-        prompt.append("### Sales Performance\n");
-        prompt.append(formatMap(sales)).append("\n\n");
+        prompt.append("### Sales Performance\n").append(formatMap(sales)).append("\n\n");
 
         prompt.append("### Top 15 Products by Revenue\n");
-        for (Map<String, Object> p : topProducts) {
-            prompt.append("- ").append(p.get("product_name"))
-                .append(": ₹").append(p.get("revenue"))
-                .append(" (qty: ").append(p.get("qty_sold")).append(")\n");
-        }
+        for (Map<String, Object> p : topProducts)
+            prompt.append("- ").append(p.get("product_name")).append(": ₹").append(p.get("revenue"))
+                  .append(" (qty: ").append(p.get("qty_sold")).append(")\n");
         prompt.append("\n");
 
         prompt.append("### Dead Stock (Products with stock but ZERO sales in 30 days)\n");
-        for (Map<String, Object> d : deadStock) {
-            prompt.append("- ").append(d.get("product_name"))
-                .append(": stock=").append(d.get("stock_quantity"))
-                .append(", value=₹").append(d.get("stock_value")).append("\n");
-        }
+        for (Map<String, Object> d : deadStock)
+            prompt.append("- ").append(d.get("product_name")).append(": stock=").append(d.get("stock_quantity"))
+                  .append(", value=₹").append(d.get("stock_value")).append("\n");
         prompt.append("\n");
 
-        prompt.append("### Purchases (30 days)\n");
-        prompt.append(formatMap(purchases)).append("\n\n");
-
-        prompt.append("### Expenses Breakdown (30 days)\n");
-        prompt.append(formatMap(expenses)).append("\n\n");
+        prompt.append("### Purchases (30 days)\n").append(formatMap(purchases)).append("\n\n");
+        prompt.append("### Expenses Breakdown (30 days)\n").append(formatMap(expenses)).append("\n\n");
 
         prompt.append("### Customer Enquiries (ecom chatbot)\n");
         prompt.append("Total sessions: ").append(enquiries.get("total_sessions"))
-            .append(", Total messages: ").append(enquiries.get("total_messages")).append("\n");
+              .append(", Total messages: ").append(enquiries.get("total_messages")).append("\n");
 
         @SuppressWarnings("unchecked")
         List<String> sampleMsgs = (List<String>) enquiries.getOrDefault("sample_messages", List.of());
@@ -344,18 +416,15 @@ public class BusinessIntelligenceService {
         prompt.append("\n");
 
         if (extraInput != null && !extraInput.isEmpty()) {
-            prompt.append("### Additional Business Context Provided by Owner\n");
-            prompt.append(formatMap(extraInput)).append("\n\n");
+            prompt.append("### Additional Business Context Provided by Owner\n")
+                  .append(formatMap(extraInput)).append("\n\n");
         }
 
         if (!trends.isEmpty() && !trends.get(0).containsKey("note")) {
             prompt.append("### Instagram/Market Trend Data\n");
-            for (Map<String, Object> t : trends) {
-                if (!t.containsKey("error")) {
-                    prompt.append("- **").append(t.get("title")).append("**: ")
-                        .append(t.get("snippet")).append("\n");
-                }
-            }
+            for (Map<String, Object> t : trends)
+                if (!t.containsKey("error"))
+                    prompt.append("- **").append(t.get("title")).append("**: ").append(t.get("snippet")).append("\n");
             prompt.append("\n");
         }
 
@@ -407,14 +476,50 @@ public class BusinessIntelligenceService {
         }
     }
 
+    // ─── Helpers ───────────────────────────────────────────────────────────────
+
+    private void ensureAiReportsTable(String schema) {
+        try {
+            jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS "%s".ai_reports (
+                    report_id    SERIAL      PRIMARY KEY,
+                    status       VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                    extra_input  TEXT,
+                    report_json  TEXT,
+                    error_msg    TEXT,
+                    created_at   TIMESTAMP   DEFAULT NOW(),
+                    completed_at TIMESTAMP
+                )""".formatted(schema));
+        } catch (Exception ignored) {}
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildResponse(Map<String, Object> row) {
+        String status = (String) row.get("status");
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("reportId", row.get("report_id"));
+        result.put("status", status);
+
+        if ("DONE".equals(status)) {
+            Object reportJson = row.get("report_json");
+            if (reportJson != null) {
+                try {
+                    Map<String, Object> data = mapper.readValue(reportJson.toString(), Map.class);
+                    result.putAll(data);
+                } catch (Exception ignored) {}
+            }
+        } else if ("FAILED".equals(status)) {
+            result.put("errorMsg", row.get("error_msg"));
+        }
+        return result;
+    }
+
     private String formatMap(Map<String, Object> map) {
         if (map == null || map.isEmpty()) return "No data";
         StringBuilder sb = new StringBuilder();
-        for (Map.Entry<String, Object> e : map.entrySet()) {
-            if (!"sample_messages".equals(e.getKey())) {
+        for (Map.Entry<String, Object> e : map.entrySet())
+            if (!"sample_messages".equals(e.getKey()))
                 sb.append("- ").append(e.getKey()).append(": ").append(e.getValue()).append("\n");
-            }
-        }
         return sb.toString();
     }
 }
