@@ -121,7 +121,8 @@ public class BusinessIntelligenceService {
         Map<String, Object> purchaseSummary  = getPurchaseSummary(schema, thirtyDaysAgo, today);
         Map<String, Object> expenseSummary   = getExpenseSummary(schema, thirtyDaysAgo, today);
         Map<String, Object> enquiryData      = getEnquiryData(schema, thirtyDaysAgo, today);
-        List<Map<String, Object>> trends     = getInstagramTrends();
+        List<Map<String, Object>> trends      = getInstagramTrends();
+        List<Map<String, Object>> trendImages = getTrendingFabricImages();
 
         String aiReport = generateAiReport(salesSummary, topProducts, deadStock,
             purchaseSummary, expenseSummary, enquiryData, trends, extraInput);
@@ -134,6 +135,7 @@ public class BusinessIntelligenceService {
         result.put("expenseSummary",  expenseSummary);
         result.put("enquiryData",     enquiryData);
         result.put("trendingFabrics", trends);
+        result.put("trendImages",     trendImages);
         result.put("aiReport",        aiReport);
         result.put("generatedAt",     today.toString());
         return result;
@@ -326,6 +328,51 @@ public class BusinessIntelligenceService {
             }
         }
         return allResults;
+    }
+
+    public List<Map<String, Object>> getTrendingFabricImages() {
+        if (serpApiKey == null || serpApiKey.isBlank()) return List.of();
+
+        List<Map<String, Object>> images = new ArrayList<>();
+        String[] queries = {
+            "trending saree fabric india 2026 fashion",
+            "trending lehenga fabric wholesale india",
+            "silk cotton georgette fabric trend india latest"
+        };
+
+        for (String query : queries) {
+            try {
+                String encoded = java.net.URLEncoder.encode(query, "UTF-8");
+                String url = "https://serpapi.com/search.json?engine=google_images&q=" + encoded +
+                    "&api_key=" + serpApiKey + "&num=6&gl=in&hl=en";
+
+                HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .timeout(Duration.ofSeconds(15))
+                    .GET().build();
+
+                HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+                JsonNode root = mapper.readTree(resp.body());
+                JsonNode results = root.path("images_results");
+
+                if (results.isArray()) {
+                    int count = 0;
+                    for (JsonNode item : results) {
+                        if (count >= 4) break;
+                        String thumbnail = item.path("thumbnail").asText();
+                        if (thumbnail.isBlank()) continue;
+                        Map<String, Object> r = new LinkedHashMap<>();
+                        r.put("thumbnail", thumbnail);
+                        r.put("title",     item.path("title").asText());
+                        r.put("source",    item.path("source").asText());
+                        r.put("link",      item.path("link").asText());
+                        images.add(r);
+                        count++;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return images;
     }
 
     // ─── AI prompt ─────────────────────────────────────────────────────────────
