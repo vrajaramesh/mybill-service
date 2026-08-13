@@ -64,6 +64,7 @@ jobs:
             RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
             RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
             META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
+            SERP_API_KEY=24bc68e79841a05d72712210a65c723ddc85ea80028c8be54f41fefc2a2125a3
           flags: >
             --memory=4Gi
             --cpu=2
