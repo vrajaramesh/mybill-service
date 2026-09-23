@@ -28,6 +28,9 @@ public class PurchaseService {
     @Autowired
     private ProductRepository productRepository;
 
+    @Autowired
+    private com.example.mybill.repository.DebitNoteRepository debitNoteRepository;
+
     public List<Purchase> getAllPurchases() {
         return purchaseRepository.findAllOrderByCreatedAtDesc();
     }
@@ -65,6 +68,11 @@ public class PurchaseService {
         Optional<Purchase> optionalPurchase = purchaseRepository.findById(id);
         if (optionalPurchase.isPresent()) {
             Purchase purchase = optionalPurchase.get();
+
+            if (purchaseDetails.getPurchaseItems() != null
+                    && debitNoteRepository.existsByPurchase_PurchaseId(id)) {
+                throw new IllegalStateException("This purchase has debit notes and its items cannot be edited.");
+            }
 
             // Update basic fields
             purchase.setInvoiceNumber(purchaseDetails.getInvoiceNumber());

@@ -27,6 +27,9 @@ public class Supplier {
     @Column(name = "address")
     private String address;
 
+    @Column(name = "gst_number", length = 20)
+    private String gstNumber;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -89,6 +92,9 @@ public class Supplier {
     public void setAddress(String address) {
         this.address = address;
     }
+
+    public String getGstNumber() { return gstNumber; }
+    public void setGstNumber(String gstNumber) { this.gstNumber = gstNumber; }
 
     public LocalDateTime getCreatedAt() {
         return createdAt;
