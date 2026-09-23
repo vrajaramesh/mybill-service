@@ -51,7 +51,13 @@ public class PurchaseService {
         calculatePurchaseTotals(purchase);
         updatePaymentStatus(purchase);
 
-        return purchaseRepository.save(purchase);
+        Purchase saved = purchaseRepository.save(purchase);
+        if (saved.getPurchaseItems() != null) {
+            for (PurchaseItem item : saved.getPurchaseItems()) {
+                adjustStock(item, BigDecimal.ONE);
+            }
+        }
+        return saved;
     }
 
     @Transactional
@@ -73,6 +79,9 @@ public class PurchaseService {
 
             // Handle purchase items update
             if (purchaseDetails.getPurchaseItems() != null) {
+                for (PurchaseItem item : purchase.getPurchaseItems()) {
+                    adjustStock(item, BigDecimal.ONE.negate());
+                }
                 purchase.getPurchaseItems().clear();
 
                 for (PurchaseItem item : purchaseDetails.getPurchaseItems()) {
@@ -80,6 +89,7 @@ public class PurchaseService {
                     item.setTotalPrice(null);
                     calculateItemFinalPrice(item);
                     purchase.getPurchaseItems().add(item);
+                    adjustStock(item, BigDecimal.ONE);
                 }
 
                 calculatePurchaseTotals(purchase);
@@ -100,8 +110,16 @@ public class PurchaseService {
         return null;
     }
 
+    @Transactional
     public void deletePurchase(Integer id) {
-        purchaseRepository.deleteById(id);
+        purchaseRepository.findById(id).ifPresent(purchase -> {
+            if (purchase.getPurchaseItems() != null) {
+                for (PurchaseItem item : purchase.getPurchaseItems()) {
+                    adjustStock(item, BigDecimal.ONE.negate());
+                }
+            }
+            purchaseRepository.delete(purchase);
+        });
     }
 
     public List<Purchase> getPurchasesBySupplier(Integer supplierId) {
@@ -145,6 +163,20 @@ public class PurchaseService {
         if (item.getGst() == null) {
             item.setGst(gstRate);
         }
+    }
+
+    private void adjustStock(PurchaseItem item, BigDecimal direction) {
+        if (item.getProduct() == null || item.getProduct().getProductId() == null
+                || item.getQuantity() == null) {
+            return;
+        }
+
+        productRepository.findById(item.getProduct().getProductId()).ifPresent(product -> {
+            BigDecimal currentStock = product.getStockQuantity() != null
+                ? product.getStockQuantity() : BigDecimal.ZERO;
+            product.setStockQuantity(currentStock.add(item.getQuantity().multiply(direction)));
+            productRepository.save(product);
+        });
     }
 
     private void calculatePurchaseTotals(Purchase purchase) {

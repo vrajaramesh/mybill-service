@@ -26,7 +26,6 @@ public class InstagramReelsService {
 
     @Autowired private ProductService productService;
     @Autowired private ProductMarketingContentRepository marketingContentRepo;
-    @Autowired private FFmpegVideoService ffmpegVideoService;
     @Autowired private HashtagGeneratorService hashtagGeneratorService;
 
     private static final Logger log = Logger.getLogger(InstagramReelsService.class.getName());
@@ -122,10 +121,8 @@ public class InstagramReelsService {
             String caption = baseCaption.isBlank() ? dynamicTags : baseCaption + "\n\n" + dynamicTags;
             log.info("[Reels] Caption to post: " + caption.substring(0, Math.min(200, caption.length())));
 
-            // 2. Render video via FFmpeg (1080x1920, Ken Burns + music)
-            update(jobId, "rendering", "Rendering Reel with " + imageUrls.size() + " image(s)...", null, null);
-            String videoUrl = ffmpegVideoService.generateSlideshow(imageUrls, productName, title);
-            log.info("[Reels] Video rendered: " + videoUrl);
+            // Video rendering is disabled when FFmpegVideoService is unavailable.
+            String videoUrl = renderVideoUnavailable();
 
             // 3. Create Instagram media container (resolves Page Access Token once)
             update(jobId, "uploading", "Uploading video to Instagram...", null, videoUrl);
@@ -158,6 +155,10 @@ public class InstagramReelsService {
     // ── Instagram Graph API ───────────────────────────────────────────────────
 
     private record IgContext(String igUserId, String pageToken) {}
+
+    private String renderVideoUnavailable() {
+        throw new IllegalStateException("Instagram Reel video generation is unavailable in this environment.");
+    }
 
     /**
      * Resolves the Instagram Business Account ID AND the Page Access Token from /me/accounts.
