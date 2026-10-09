@@ -26,7 +26,7 @@ public class BillService {
 
     @Transactional(readOnly = true)
     public List<Bill> getAllBills() {
-        return billRepository.findAllOrderByCreatedAtDesc();
+        return billRepository.findAllWithItemsOrderByCreatedAtDesc();
     }
 
     @Transactional(readOnly = true)

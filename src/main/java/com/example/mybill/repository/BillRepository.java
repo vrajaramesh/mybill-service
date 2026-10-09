@@ -13,6 +13,11 @@ public interface BillRepository extends JpaRepository<Bill, Integer> {
     @Query("SELECT b FROM Bill b ORDER BY b.createdAt DESC")
     List<Bill> findAllOrderByCreatedAtDesc();
 
+    /** Transaction list: bills + customer + items + product in one query instead of several queries per bill. */
+    @Query("SELECT b FROM Bill b LEFT JOIN FETCH b.customer LEFT JOIN FETCH b.billItems bi "
+         + "LEFT JOIN FETCH bi.product p LEFT JOIN FETCH p.subCategory ORDER BY b.createdAt DESC, b.billId DESC, bi.billItemId")
+    List<Bill> findAllWithItemsOrderByCreatedAtDesc();
+
     @Query("SELECT b.billNumber FROM Bill b WHERE b.billNumber LIKE CONCAT('BILL-', :year, '-%') ORDER BY b.billNumber DESC")
     List<String> findBillNumbersByYear(@Param("year") String year);
 

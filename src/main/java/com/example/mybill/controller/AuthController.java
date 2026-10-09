@@ -130,6 +130,62 @@ public class AuthController {
         return loginToFirm(username, password, firmCode);
     }
 
+    // ── Sliding session: swap a still-valid token for a fresh one ─────────────
+
+    /**
+     * Re-issues the caller's token with a new expiry so an app that is used regularly never needs a re-login.
+     * Only a valid, unexpired token is accepted, and the user / firm (and admin firm access) must still be active.
+     */
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refresh(@RequestHeader(value = "Authorization", required = false) String authHeader) {
+        if (authHeader == null || !authHeader.startsWith("Bearer "))
+            return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+        String token = authHeader.substring(7);
+        if (!jwtUtil.isValid(token))
+            return ResponseEntity.status(401).body(Map.of("error", "Token is invalid or expired"));
+
+        var claims = jwtUtil.extractClaims(token);
+        String username = claims.getSubject();
+        String role = claims.get("role", String.class);
+        Number firmIdClaim = claims.get("firmId", Number.class);
+        long firmId = firmIdClaim != null ? firmIdClaim.longValue() : 0L;
+        Optional<AppUserPublic> publicUser = appUserPublicRepository.findActiveByUsername(username);
+
+        if ("SUPERADMIN".equals(role)) {
+            if (publicUser.isEmpty() || !"SUPERADMIN".equals(publicUser.get().getRole()))
+                return ResponseEntity.status(401).body(Map.of("error", "User is no longer active"));
+            return ResponseEntity.ok(Map.of("token", jwtUtil.generateToken(username, "public", 0L, "SUPERADMIN")));
+        }
+
+        Optional<Firm> firmOpt = firmRepository.findById(firmId);
+        if (firmOpt.isEmpty() || !Boolean.TRUE.equals(firmOpt.get().getIsActive()))
+            return ResponseEntity.status(401).body(Map.of("error", "Firm is inactive"));
+        Firm firm = firmOpt.get();
+        String schema = firm.getSchemaName();
+
+        String newRole;
+        if (publicUser.isPresent() && "SUPERADMIN".equals(publicUser.get().getRole())) {
+            newRole = "ADMIN";   // superadmin inside a firm context
+        } else if (publicUser.isPresent() && "ADMIN".equals(publicUser.get().getRole())) {
+            Integer access = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM public.admin_firm_access WHERE admin_id = ? AND firm_id = ? AND is_active = TRUE",
+                Integer.class, publicUser.get().getUserId(), firm.getFirmId());
+            if (access == null || access == 0)
+                return ResponseEntity.status(401).body(Map.of("error", "Firm access was removed"));
+            newRole = "ADMIN";
+        } else {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT role, is_active FROM \"" + schema + "\".app_users WHERE username = ?", username);
+            if (rows.isEmpty() || !Boolean.TRUE.equals(rows.get(0).get("is_active")))
+                return ResponseEntity.status(401).body(Map.of("error", "User is no longer active"));
+            newRole = (String) rows.get(0).get("role");
+        }
+        if (!Objects.equals(newRole, role))
+            return ResponseEntity.status(401).body(Map.of("error", "Role changed — please sign in again"));
+
+        return ResponseEntity.ok(Map.of("token", jwtUtil.generateToken(username, schema, firm.getFirmId(), newRole)));
+    }
+
     // ── SUPERADMIN response ───────────────────────────────────────────────────
 
     private ResponseEntity<?> superadminLoginResponse(AppUserPublic sa) {

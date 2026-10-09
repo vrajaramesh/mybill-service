@@ -80,6 +80,88 @@ public class ReportService {
         }).collect(Collectors.toList());
     }
 
+    private static final java.time.ZoneId SHOP_ZONE = java.time.ZoneId.of("Asia/Kolkata");
+
+    /**
+     * Top selling products for a calendar period (shop time, weeks Monday–Sunday):
+     * today | yesterday | this_week | last_week | this_month | last_month. sort = revenue (default) | quantity.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> getTopProductsByPeriod(String period, String sort, int limit) {
+        LocalDate today = LocalDate.now(SHOP_ZONE);
+        LocalDate thisMonday = today.with(DayOfWeek.MONDAY);
+        LocalDate from, to;
+        switch (period) {
+            case "today"      -> { from = today; to = today; }
+            case "yesterday"  -> { from = today.minusDays(1); to = today.minusDays(1); }
+            case "this_week"  -> { from = thisMonday; to = today; }
+            case "last_week"  -> { from = thisMonday.minusWeeks(1); to = thisMonday.minusDays(1); }
+            case "last_month" -> { from = today.minusMonths(1).withDayOfMonth(1); to = today.withDayOfMonth(1).minusDays(1); }
+            default           -> { period = "this_month"; from = today.withDayOfMonth(1); to = today; }
+        }
+        boolean byQuantity = "quantity".equalsIgnoreCase(sort);
+        int lim = Math.max(1, Math.min(limit, 100));
+
+        Object[] sum = (Object[]) em.createNativeQuery(
+            "SELECT COALESCE(SUM(bi.total_price),0), COALESCE(SUM(bi.quantity),0), COUNT(DISTINCT bi.bill_id), " +
+            "       COUNT(DISTINCT bi.product_id) " +
+            "FROM bill_items bi JOIN bills b ON bi.bill_id = b.bill_id " +
+            "WHERE b.bill_date BETWEEN :from AND :to AND bi.product_id IS NOT NULL"
+        ).setParameter("from", from).setParameter("to", to).getSingleResult();
+        BigDecimal totalRevenue = toBig(sum[0]);
+
+        List<Object[]> rows = em.createNativeQuery(
+            "SELECT p.product_id, p.product_name, COALESCE(p.category, 'Uncategorized'), " +
+            "       SUM(bi.quantity), SUM(bi.total_price), COUNT(DISTINCT bi.bill_id) " +
+            "FROM bill_items bi " +
+            "JOIN products p ON bi.product_id = p.product_id " +
+            "JOIN bills b    ON bi.bill_id = b.bill_id " +
+            "WHERE b.bill_date BETWEEN :from AND :to AND bi.product_id IS NOT NULL " +
+            "GROUP BY p.product_id, p.product_name, p.category " +
+            (byQuantity ? "ORDER BY SUM(bi.quantity) DESC, SUM(bi.total_price) DESC "
+                        : "ORDER BY SUM(bi.total_price) DESC, SUM(bi.quantity) DESC ") +
+            "LIMIT :lim"
+        ).setParameter("from", from).setParameter("to", to).setParameter("lim", lim).getResultList();
+
+        List<Map<String, Object>> products = new ArrayList<>();
+        int rank = 1;
+        for (Object[] r : rows) {
+            BigDecimal revenue = toBig(r[4]);
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("rank",         rank++);
+            m.put("productId",    r[0]);
+            m.put("productName",  r[1]);
+            m.put("category",     r[2]);
+            m.put("quantitySold", r[3]);
+            m.put("revenue",      revenue);
+            m.put("billCount",    ((Number) r[5]).longValue());
+            m.put("sharePct",     totalRevenue.signum() > 0
+                ? Math.round(revenue.doubleValue() / totalRevenue.doubleValue() * 1000) / 10.0 : 0);
+            products.add(m);
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalRevenue",    totalRevenue);
+        summary.put("totalQuantity",   sum[1]);
+        summary.put("billCount",       ((Number) sum[2]).longValue());
+        summary.put("productsSold",    ((Number) sum[3]).longValue());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("period",   period);
+        result.put("sort",     byQuantity ? "quantity" : "revenue");
+        result.put("from",     from.toString());
+        result.put("to",       to.toString());
+        result.put("summary",  summary);
+        result.put("products", products);
+        return result;
+    }
+
+    private static BigDecimal toBig(Object o) {
+        if (o == null) return BigDecimal.ZERO;
+        if (o instanceof BigDecimal b) return b;
+        return new BigDecimal(o.toString());
+    }
+
     @SuppressWarnings("unchecked")
     public List<Map<String, Object>> getCategoryRevenue(int year) {
         List<Object[]> rows = em.createNativeQuery(

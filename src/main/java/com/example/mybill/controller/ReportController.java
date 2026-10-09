@@ -33,6 +33,15 @@ public class ReportController {
         return reportService.getTopProducts(year, limit);
     }
 
+    /** Top selling products for today | yesterday | this_week | last_week | this_month | last_month (sort: revenue | quantity). */
+    @GetMapping("/top-products-period")
+    public Map<String, Object> getTopProductsByPeriod(
+            @RequestParam(defaultValue = "this_month") String period,
+            @RequestParam(defaultValue = "revenue") String sort,
+            @RequestParam(defaultValue = "10") int limit) {
+        return reportService.getTopProductsByPeriod(period, sort, limit);
+    }
+
     @GetMapping("/category-revenue")
     public List<Map<String, Object>> getCategoryRevenue(@RequestParam int year) {
         return reportService.getCategoryRevenue(year);
