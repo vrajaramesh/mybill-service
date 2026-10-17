@@ -65,6 +65,9 @@ jobs:
             RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
             META_ACCESS_TOKEN=${{ secrets.META_ACCESS_TOKEN }}
             SERP_API_KEY=24bc68e79841a05d72712210a65c723ddc85ea80028c8be54f41fefc2a2125a3
+            AGENT_API_AUDIENCE=https://mybill-service-276371417285.us-central1.run.app
+            AGENT_ALLOWED_SA_EMAIL=srisa-agent-sa@project-0708fb26-e204-4400-ae9.iam.gserviceaccount.com
+            AGENT_TENANT_SCHEMA=firm_srisa
           flags: >
             --memory=4Gi
             --cpu=2

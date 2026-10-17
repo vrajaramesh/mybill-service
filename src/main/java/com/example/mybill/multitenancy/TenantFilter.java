@@ -37,6 +37,12 @@ public class TenantFilter extends OncePerRequestFilter {
             return;
         }
 
+        // Agent API — authenticated and tenant-scoped by AgentAuthFilter (Google ID token, fixed tenant)
+        if (path.startsWith("/api/agent/")) {
+            chain.doFilter(request, response);
+            return;
+        }
+
         String authHeader = request.getHeader("Authorization");
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);

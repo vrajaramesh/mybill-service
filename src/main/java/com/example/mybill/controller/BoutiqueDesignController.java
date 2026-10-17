@@ -1,5 +1,6 @@
 package com.example.mybill.controller;
 
+import com.example.mybill.boutique.config.BoutiqueSchemaInitializer;
 import com.example.mybill.multitenancy.TenantContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +15,9 @@ public class BoutiqueDesignController {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private BoutiqueSchemaInitializer boutiqueSchemaInitializer;
 
     // ── List all designs with their images ───────────────────────────────────
 
@@ -108,6 +112,13 @@ public class BoutiqueDesignController {
 
         if (generatedIds.isEmpty()) return ResponseEntity.internalServerError().build();
         int designId = generatedIds.get(0);
+
+        // Code the AI agent uses to refer to the design (e.g. "Lehenga" #7 -> LEH-7), same rule as db/boutique/V1.
+        boutiqueSchemaInitializer.ensureSchema(s);
+        jdbcTemplate.update(
+            "UPDATE \"" + s + "\".boutique_designs SET code = COALESCE(NULLIF(UPPER(LEFT(" +
+            "REGEXP_REPLACE(garment_type, '[^A-Za-z]', '', 'g'), 3)), ''), 'BD') || '-' || design_id " +
+            "WHERE design_id = ? AND code IS NULL", designId);
 
         // Save images if provided
         saveImages(s, designId, body);
