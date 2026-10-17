@@ -13,8 +13,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.example.mybill.boutique.repository.BoutiqueCustomerRepository;
+import org.springframework.data.domain.PageRequest;
+
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /** Quotes and DRAFT orders for the agent. All prices come from PricingService. */
 @Service
@@ -27,6 +34,11 @@ public class AgentOrderService {
     @Autowired private AgentCustomerService customerService;
     @Autowired private PricingService pricingService;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private ShippingService shippingService;
+    @Autowired private BoutiqueCustomerRepository customerRepository;
+
+    static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    static final int MAX_LIST = 100;
 
     public record CreateResult(OrderResponse order, boolean created) {}
 
@@ -37,8 +49,11 @@ public class AgentOrderService {
     public QuoteResponse quote(QuoteRequest request) {
         Priced p = price(request.designCode(), request.sizeCode(), request.optionIds(),
             request.qty() == null ? 1 : request.qty());
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(),
+            leadTime(p.design()), LocalDate.now(IST));
         return new QuoteResponse(p.design().getCode(), p.design().displayName(), p.sizeCode(),
-            p.design().getLeadTimeDays(), p.breakdown());
+            p.design().getLeadTimeDays(), p.breakdown(), ship.serviceable(), ship.transitDays(),
+            ship.estimatedDeliveryDate());
     }
 
     /**
@@ -58,6 +73,12 @@ public class AgentOrderService {
         Priced p = price(request.designCode(), request.sizeCode(), request.optionIds(), request.qty());
         PriceBreakdown b = p.breakdown();
         LocalDateTime now = LocalDateTime.now();
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.delivery().pincode(),
+            leadTime(p.design()), LocalDate.now(IST));
+        if (!ship.serviceable()) {
+            throw AgentApiException.unprocessable("PINCODE_NOT_SERVICEABLE", "We cannot deliver to this pincode yet",
+                Map.of("pincode", request.delivery().pincode(), "reason", String.valueOf(ship.reason())));
+        }
 
         BoutiqueOrder order = new BoutiqueOrder();
         order.setOrderNo("SB-" + orderRepository.nextOrderNumber());
@@ -76,6 +97,7 @@ public class AgentOrderService {
         order.setTotal(b.total());
         order.setChannel(request.channel().toUpperCase(Locale.ROOT));
         order.setIdempotencyKey(request.idempotencyKey());
+        order.setEstimatedDeliveryDate(ship.estimatedDeliveryDate());
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
 
@@ -85,8 +107,9 @@ public class AgentOrderService {
         item.setDesignName(p.design().displayName());
         item.setSizeCode(p.sizeCode());
         item.setOptionsSnapshot(toJson(b.options()));
-        item.setMeasurementsSnapshot(customerService.findLatestMeasurement(request.customerId())
-            .map(m -> toJson(measurementSnapshot(m))).orElse(null));
+        item.setMeasurementsSnapshot(request.measurements() != null
+            ? toJson(measurementSnapshot(request.measurements()))
+            : customerService.findLatestMeasurement(request.customerId()).map(m -> toJson(measurementSnapshot(m))).orElse(null));
         item.setUnitPrice(b.unitPrice());
         item.setQuantity(b.qty());
         item.setLineTotal(b.subtotal());
@@ -99,6 +122,38 @@ public class AgentOrderService {
     public Optional<OrderResponse> findByIdempotencyKey(String key, Integer customerId) {
         return orderRepository.findByIdempotencyKey(key)
             .map(o -> toResponse(sameCustomer(o, customerId)));
+    }
+
+    /** Newest orders first, optionally one status. limit is clamped to 1..100. */
+    @Transactional(readOnly = true)
+    public List<OrderSummary> list(String status, int limit) {
+        PageRequest page = PageRequest.of(0, Math.max(1, Math.min(limit, MAX_LIST)));
+        List<BoutiqueOrder> orders;
+        if (status == null || status.isBlank()) {
+            orders = orderRepository.findAllByOrderByCreatedAtDescOrderIdDesc(page);
+        } else {
+            BoutiqueOrderStatus s;
+            try {
+                s = BoutiqueOrderStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                throw new AgentApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "status must be one of " + Arrays.toString(BoutiqueOrderStatus.values()), Map.of("status", status));
+            }
+            orders = orderRepository.findByStatusOrderByCreatedAtDescOrderIdDesc(s, page);
+        }
+        Map<Integer, BoutiqueCustomer> customers = customerRepository
+            .findAllById(orders.stream().map(BoutiqueOrder::getCustomerId).collect(Collectors.toSet())).stream()
+            .collect(Collectors.toMap(BoutiqueCustomer::getCustomerId, Function.identity()));
+        return orders.stream().map(o -> {
+            BoutiqueCustomer c = customers.get(o.getCustomerId());
+            BoutiqueOrderItem first = o.getItems().isEmpty() ? null : o.getItems().get(0);
+            return new OrderSummary(o.getOrderNo(), o.getStatus().name(), o.getChannel(), o.getCustomerId(),
+                c == null ? null : c.getCustomerName(),
+                c == null ? null : (c.getPhoneE164() != null ? c.getPhoneE164() : c.getPhone()),
+                first == null ? null : first.getDesignCode(), first == null ? null : first.getDesignName(),
+                first == null ? null : first.getSizeCode(), first == null ? 0 : first.getQuantity(),
+                o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(), o.getCreatedAt());
+        }).toList();
     }
 
     @Transactional(readOnly = true)
@@ -130,8 +185,26 @@ public class AgentOrderService {
         return order;
     }
 
+    private static int leadTime(BoutiqueDesign design) {
+        return design.getLeadTimeDays() == null ? 0 : design.getLeadTimeDays();
+    }
+
+    private Map<String, Object> measurementSnapshot(OrderMeasurements m) {
+        Map<String, Object> snap = new LinkedHashMap<>();
+        snap.put("source", "order_request");
+        snap.put("size_code", m.sizeCode() == null || m.sizeCode().isBlank() ? null : catalogService.requireSize(m.sizeCode()));
+        snap.put("height_cm", m.heightCm());
+        snap.put("bust_in", m.bustIn());
+        snap.put("waist_in", m.waistIn());
+        snap.put("hip_in", m.hipIn());
+        snap.put("fit_preference", m.fitPreference() == null ? null : m.fitPreference().toUpperCase(Locale.ROOT));
+        snap.put("notes", m.notes() == null || m.notes().isBlank() ? null : m.notes().trim());
+        return snap;
+    }
+
     private static Map<String, Object> measurementSnapshot(BoutiqueMeasurement m) {
         Map<String, Object> snap = new LinkedHashMap<>();
+        snap.put("source", "saved_profile");
         snap.put("measurement_id", m.getMeasurementId());
         snap.put("size_code", m.getSizeCode());
         snap.put("height_cm", m.getHeightCm());
@@ -156,7 +229,8 @@ public class AgentOrderService {
             o.getDeliveryAddressLine1(), o.getDeliveryAddressLine2(), o.getDeliveryCity(), o.getDeliveryState(),
             o.getDeliveryPincode());
         return new OrderResponse(o.getOrderNo(), o.getStatus().name(), o.getCustomerId(), o.getChannel(), delivery,
-            items, o.getSubtotal(), o.getDeliveryCharge(), o.getTotal(), PricingService.CURRENCY, o.getCreatedAt());
+            items, o.getSubtotal(), o.getDeliveryCharge(), o.getTotal(), PricingService.CURRENCY,
+            o.getEstimatedDeliveryDate(), o.getCreatedAt());
     }
 
     private String toJson(Object value) {

@@ -40,6 +40,7 @@ The app's own login JWT is **not** accepted on these paths, and Google tokens ar
 | `agent.auth.enabled` | — | `true`. Only `application-local.properties` sets `false`; with any other profile the app refuses to start. |
 | `boutique.delivery.flat-charge` | `BOUTIQUE_DELIVERY_FLAT_CHARGE` | `100` |
 | `boutique.delivery.free-above` | `BOUTIQUE_DELIVERY_FREE_ABOVE` | `2500` |
+| `boutique.delivery.transit-days` | `BOUTIQUE_DELIVERY_TRANSIT_DAYS` | `5` (courier days added after stitching) |
 
 The audience must match **exactly** the string srisa-agent asks for when it mints its token. Use the URL above, not the `…-6rjdx4lmcq-uc.a.run.app` alias.
 
@@ -84,7 +85,7 @@ Every error has the same shape:
 | 400 | `VALIDATION_FAILED` (`details.fields` maps each field to its message), `MALFORMED_REQUEST` |
 | 404 | `DESIGN_NOT_FOUND`, `CUSTOMER_NOT_FOUND`, `MEASUREMENTS_NOT_FOUND`, `ORDER_NOT_FOUND` |
 | 409 | `PHONE_IN_USE`, `INSTAGRAM_IN_USE`, `IDEMPOTENCY_KEY_REUSED`, `CONFLICT` |
-| 422 | `DESIGN_INACTIVE`, `DESIGN_NOT_PRICED`, `INVALID_SIZE` (`details.valid_sizes`), `INVALID_OPTION`, `DUPLICATE_OPTION`, `OPTION_GROUP_CONFLICT`, `CUSTOMER_NOT_FOUND` (in an order body) |
+| 422 | `PINCODE_NOT_SERVICEABLE`, `DESIGN_INACTIVE`, `DESIGN_NOT_PRICED`, `INVALID_SIZE` (`details.valid_sizes`), `INVALID_OPTION`, `DUPLICATE_OPTION`, `OPTION_GROUP_CONFLICT`, `CUSTOMER_NOT_FOUND` (in an order body) |
 
 ## Endpoints
 
@@ -185,8 +186,13 @@ Returns a price. Nothing is saved.
     "options": [ { "option_id": 6,  "option_group": "SLEEVE", "name": "Full sleeve",     "price_delta": 150.00 },
                  { "option_id": 10, "option_group": "NECK",   "name": "Sweetheart neck", "price_delta": 200.00 } ],
     "options_total": 350.00, "unit_price": 2249.00, "qty": 1, "subtotal": 2249.00,
-    "delivery_charge": 100.00, "free_delivery_above": 2500.00, "total": 2349.00, "currency": "INR" } }
+    "delivery_charge": 100.00, "free_delivery_above": 2500.00, "total": 2349.00, "currency": "INR" },
+  "serviceable": true, "transit_days": 5, "estimated_delivery_date": "2026-10-29" }
 ```
+
+`estimated_delivery_date` = today (Asia/Kolkata) + the design's `lead_time_days` + `transit_days`, counted in calendar days. It is `null` when `serviceable` is false.
+
+**Serviceability:** for now this only checks the pincode format (6 digits, not starting with 0). A malformed `pincode` in a quote is rejected with 400. A Shiprocket check will plug in later behind the `ShippingService` interface.
 
 How the price is worked out:
 - `unit_price` = `base_price` + the sum of the options' `price_delta`
@@ -208,8 +214,15 @@ Creates a **DRAFT** order, priced by the server in the same way as the quote.
 { "customer_id": 512, "design_code": "KUR-101", "size_code": "M", "option_ids": [6, 10], "qty": 1,
   "delivery": { "name": "Asha Rao", "phone": "+91 98765 43210", "address_line1": "12 MG Road", "address_line2": "Flat 3B",
                 "city": "Hyderabad", "state": "Telangana", "pincode": "500001" },
+  "measurements": { "size_code": "M", "height_cm": 160, "bust_in": 36, "waist_in": 30, "hip_in": 39,
+                    "fit_preference": "REGULAR", "notes": "Prefers loose sleeves" },
   "channel": "WHATSAPP", "idempotency_key": "wa:919876543210:2026-10-17T18:06:00" }
 ```
+
+- `measurements` is **optional**. Every field in it is optional, with the same ranges as `POST /customers/{id}/measurements`; `size_code` must be in the size chart when given.
+  - If `measurements` is sent, it is stored as the order line's measurements snapshot, with `"source": "order_request"`.
+  - Otherwise the customer's latest saved profile is used (`"source": "saved_profile"`), or `null` if there is none.
+- The delivery pincode must be serviceable; otherwise the response is 422 `PINCODE_NOT_SERVICEABLE`. The order stores its `estimated_delivery_date` at creation, so it doesn't change later.
 
 - `channel` is `WHATSAPP`, `INSTAGRAM`, `WEB` or `SHOP`; `qty` is 1 to 10.
 - **Idempotency:** generate one `idempotency_key` per order attempt and reuse it on every retry. A repeat returns the **original** order with **200** instead of 201, and no duplicate is created, even for two requests at the same moment. Using the same key for a different customer returns 409 `IDEMPOTENCY_KEY_REUSED`.
@@ -224,15 +237,35 @@ Response **201**:
   "items": [ { "design_code": "KUR-101", "design_name": "Anarkali Kurta - Rose", "size_code": "M",
                "options": [ { "option_id": 6, "option_group": "SLEEVE", "name": "Full sleeve", "price_delta": 150.00 },
                             { "option_id": 10, "option_group": "NECK", "name": "Sweetheart neck", "price_delta": 200.00 } ],
-               "measurements": { "measurement_id": 77, "size_code": "M", "height_cm": 160.0, "bust_in": 36.0,
+               "measurements": { "source": "saved_profile", "measurement_id": 77, "size_code": "M", "height_cm": 160.0, "bust_in": 36.0,
                                  "waist_in": 30.0, "hip_in": 39.0, "fit_preference": "REGULAR", "notes": null,
                                  "recorded_at": "2026-10-17T18:05:40" },
                "unit_price": 2249.00, "qty": 1, "line_total": 2249.00 } ],
   "subtotal": 2249.00, "delivery_charge": 100.00, "total": 2349.00, "currency": "INR",
-  "created_at": "2026-10-17T18:06:02" }
+  "estimated_delivery_date": "2026-10-29", "created_at": "2026-10-17T18:06:02" }
 ```
 
 `measurements` is `null` if the customer had no measurements when the order was placed.
+
+### `GET /api/agent/orders?status=DRAFT&limit=20`
+
+Recent orders, newest first, for staff/admin use and testing. `status` is optional and not case-sensitive: `DRAFT`, `PAID`, `IN_STITCHING`, `DISPATCHED`, `DELIVERED` or `CANCELLED`; an unknown value returns 400. `limit` can be 1 to 100 (default 20).
+
+```json
+[ { "order_no": "SB-1001", "status": "DRAFT", "channel": "WHATSAPP", "customer_id": 512, "customer_name": "Asha Rao",
+    "customer_phone": "+919876543210", "design_code": "KUR-101", "design_name": "Anarkali Kurta - Rose", "size_code": "M",
+    "qty": 1, "total": 2349.00, "currency": "INR", "estimated_delivery_date": "2026-10-29",
+    "created_at": "2026-10-17T18:06:02" } ]
+```
+
+### Staff endpoints for mybill-ui (app login, not Google tokens)
+
+The **Boutique Orders** page in mybill-ui reads the same data through endpoints that use the normal app login (`Authorization: Bearer <app JWT>`, tenant = the logged-in firm). They are read-only:
+
+- `GET /api/boutique-orders?status=&limit=50` returns the same rows as above.
+- `GET /api/boutique-orders/{orderNo}` returns the same shape as the order response.
+
+A superadmin token without a firm gets 403. Google ID tokens are not accepted here.
 
 ### `GET /api/agent/orders/{orderNo}`
 
@@ -240,7 +273,7 @@ Returns the order in the same shape as the create response (`SB-1001`; not case-
 
 ## Data model notes
 
-The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V3`. That happens on startup, and also on the first agent call for a firm registered later.
+The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V4`. That happens on startup, and also on the first agent call for a firm registered later.
 
 | Table | Notes |
 |---|---|
@@ -250,7 +283,7 @@ The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from 
 | `size_chart` | New. Filled with a standard XS–XXL chart, but only if the table is empty. |
 | `customers` | Gets new columns `phone_e164` and `instagram_user_id` (both unique where not empty), `source` (existing rows are `SHOP`) and `updated_at`. `phone_e164` was filled from the old phone column wherever the result was unambiguous. Numbers shared by several customers were left empty, and the startup log says how many. |
 | `customer_measurements` | Gets new columns `size_code`, `height_cm`, `fit_preference`, `source`. The API's `bust_in` is stored in the existing `chest` column. |
-| `boutique_orders`, `boutique_order_items` | New. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
+| `boutique_orders`, `boutique_order_items` | New. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
 
 Sample data for testing (`KUR-101..103` plus options) is in `src/main/resources/db/boutique/dev-seed.sql`. It is **not** run automatically:
 

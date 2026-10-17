@@ -35,7 +35,8 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
     static final List<String> SCRIPTS = List.of(
         "db/boutique/V1__boutique_catalog.sql",
         "db/boutique/V2__boutique_customers.sql",
-        "db/boutique/V3__boutique_orders.sql");
+        "db/boutique/V3__boutique_orders.sql",
+        "db/boutique/V4__boutique_order_delivery_estimate.sql");
 
     private final Set<String> readySchemas = ConcurrentHashMap.newKeySet();
 

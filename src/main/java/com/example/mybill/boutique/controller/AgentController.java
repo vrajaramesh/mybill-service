@@ -78,6 +78,13 @@ public class AgentController {
         }
     }
 
+    /** Recent orders for staff/admin use and testing, e.g. ?status=DRAFT&limit=20 (limit 1..100). */
+    @GetMapping("/orders")
+    public List<OrderSummary> orders(@RequestParam(required = false) String status,
+                                     @RequestParam(defaultValue = "20") int limit) {
+        return orderService.list(status, limit);
+    }
+
     @GetMapping("/orders/{orderNo}")
     public OrderResponse order(@PathVariable String orderNo) {
         return orderService.get(orderNo);

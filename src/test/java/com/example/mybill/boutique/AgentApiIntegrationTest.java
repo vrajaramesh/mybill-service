@@ -17,6 +17,8 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,11 +43,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
     "agent.allowed-sa-email=srisa-agent-sa@test.iam.gserviceaccount.com",
     "agent.tenant-schema=firm_agentapi",
     "boutique.delivery.flat-charge=100",
-    "boutique.delivery.free-above=2500"
+    "boutique.delivery.free-above=2500",
+    "boutique.delivery.transit-days=5"
 })
 class AgentApiIntegrationTest extends AbstractFirmIntegrationTest {
 
     private static final String AGENT = "Bearer agent-token";
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     @MockBean private AgentTokenVerifier tokenVerifier;
     @Autowired private BoutiqueSchemaInitializer boutiqueSchemaInitializer;
@@ -267,7 +271,11 @@ class AgentApiIntegrationTest extends AbstractFirmIntegrationTest {
             .andExpect(jsonPath("$.breakdown.unit_price").value(1649.00))
             .andExpect(jsonPath("$.breakdown.delivery_charge").value(100.00))
             .andExpect(jsonPath("$.breakdown.total").value(1749.00))
-            .andExpect(jsonPath("$.breakdown.currency").value("INR"));
+            .andExpect(jsonPath("$.breakdown.currency").value("INR"))
+            .andExpect(jsonPath("$.serviceable").value(true))
+            .andExpect(jsonPath("$.transit_days").value(5))
+            // lead time 7 + transit 5
+            .andExpect(jsonPath("$.estimated_delivery_date").value(LocalDate.now(IST).plusDays(12).toString()));
     }
 
     @Test
@@ -312,6 +320,8 @@ class AgentApiIntegrationTest extends AbstractFirmIntegrationTest {
             .andExpect(jsonPath("$.subtotal").value(2898.00))
             .andExpect(jsonPath("$.delivery_charge").value(0.00))     // above the free-delivery threshold
             .andExpect(jsonPath("$.total").value(2898.00))
+            .andExpect(jsonPath("$.estimated_delivery_date").value(LocalDate.now(IST).plusDays(12).toString()))
+            .andExpect(jsonPath("$.items[0].measurements.source").value("saved_profile"))
             .andReturn().getResponse().getContentAsString();
         String orderNo = json.readTree(first).get("order_no").asText();
 
@@ -353,6 +363,62 @@ class AgentApiIntegrationTest extends AbstractFirmIntegrationTest {
         agentPost("/api/agent/orders", "{\"design_code\":\"KUR-101\"}")
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.details.fields.idempotency_key").exists());
+    }
+
+    @Test
+    void createOrder_withMeasurementsInRequest_snapshotsThem() throws Exception {
+        int customerId = newCustomer("+919811100006");
+        agentPost("/api/agent/customers/" + customerId + "/measurements", "{\"size_code\":\"S\",\"bust_in\":34}");
+        String body = orderBody(customerId, "with-measurements").replace("\"channel\"",
+            "\"measurements\":{\"size_code\":\"l\",\"height_cm\":162,\"bust_in\":38,\"waist_in\":32,\"hip_in\":41,"
+                + "\"fit_preference\":\"relaxed\",\"notes\":\"loose sleeves\"},\"channel\"");
+        agentPost("/api/agent/orders", body)
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.items[0].measurements.source").value("order_request"))
+            .andExpect(jsonPath("$.items[0].measurements.size_code").value("L"))
+            .andExpect(jsonPath("$.items[0].measurements.bust_in").value(38))
+            .andExpect(jsonPath("$.items[0].measurements.fit_preference").value("RELAXED"))
+            .andExpect(jsonPath("$.items[0].measurements.notes").value("loose sleeves"));
+
+        agentPost("/api/agent/orders", orderBody(customerId, "bad-measurements").replace("\"channel\"",
+                "\"measurements\":{\"bust_in\":92},\"channel\""))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.details.fields['measurements.bust_in']").exists());
+    }
+
+    @Test
+    void listOrders_newestFirst_filteredByStatus() throws Exception {
+        int customerId = newCustomer("+919811100007");
+        agentPost("/api/agent/orders", orderBody(customerId, "list-1")).andExpect(status().isCreated());
+        agentPost("/api/agent/orders", orderBody(customerId, "list-2")).andExpect(status().isCreated());
+
+        agent(get("/api/agent/orders?status=draft&limit=1"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0].status").value("DRAFT"))
+            .andExpect(jsonPath("$[0].customer_name").value("Test"))
+            .andExpect(jsonPath("$[0].design_code").value("KUR-101"))
+            .andExpect(jsonPath("$[0].size_code").value("M"))
+            .andExpect(jsonPath("$[0].total").value(2898.00));
+        agent(get("/api/agent/orders?status=PAID")).andExpect(jsonPath("$.length()").value(0));
+        agent(get("/api/agent/orders?status=NOPE")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void staffEndpoints_useAppLogin_notGoogleToken() throws Exception {
+        int customerId = newCustomer("+919811100008");
+        String created = agentPost("/api/agent/orders", orderBody(customerId, "staff-view"))
+            .andReturn().getResponse().getContentAsString();
+        String orderNo = json.readTree(created).get("order_no").asText();
+
+        mvc.perform(get("/api/boutique-orders").header("Authorization", firm.bearer()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[?(@.order_no == '" + orderNo + "')]").exists());
+        mvc.perform(get("/api/boutique-orders/" + orderNo).header("Authorization", firm.bearer()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.delivery.city").value("Hyderabad"));
+        mvc.perform(get("/api/boutique-orders").header("Authorization", AGENT)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/boutique-orders").header("Authorization", superadminBearer())).andExpect(status().isForbidden());
     }
 
     @Test

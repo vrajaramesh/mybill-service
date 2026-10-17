@@ -53,6 +53,10 @@ public class BoutiqueOrder {
     @Column(name = "idempotency_key", nullable = false, length = 100)
     private String idempotencyKey;
 
+    /** today + lead time + transit days at order time (ShippingService). */
+    @Column(name = "estimated_delivery_date")
+    private java.time.LocalDate estimatedDeliveryDate;
+
     @Column(name = "stitching_order_id")
     private Integer stitchingOrderId;
 
@@ -103,6 +107,8 @@ public class BoutiqueOrder {
     public void setChannel(String channel) { this.channel = channel; }
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
+    public java.time.LocalDate getEstimatedDeliveryDate() { return estimatedDeliveryDate; }
+    public void setEstimatedDeliveryDate(java.time.LocalDate v) { this.estimatedDeliveryDate = v; }
     public Integer getStitchingOrderId() { return stitchingOrderId; }
     public void setStitchingOrderId(Integer stitchingOrderId) { this.stitchingOrderId = stitchingOrderId; }
     public LocalDateTime getCreatedAt() { return createdAt; }

@@ -29,6 +29,10 @@ public record CreateOrderRequest(
     @NotNull(message = "delivery is required") @Valid
     DeliveryDetails delivery,
 
+    /** Optional: measurements given in this conversation; else the customer's latest saved profile is used. */
+    @Valid
+    OrderMeasurements measurements,
+
     @NotBlank(message = "channel is required")
     @Pattern(regexp = "^(?i)(WHATSAPP|INSTAGRAM|WEB|SHOP)$", message = "channel must be WHATSAPP, INSTAGRAM, WEB or SHOP")
     String channel,

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -19,5 +20,6 @@ public record OrderResponse(
     BigDecimal deliveryCharge,
     BigDecimal total,
     String currency,
+    LocalDate estimatedDeliveryDate,
     LocalDateTime createdAt
 ) {}
