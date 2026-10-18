@@ -36,6 +36,8 @@ public class AgentOrderService {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ShippingService shippingService;
     @Autowired private BoutiqueCustomerRepository customerRepository;
+    @Autowired @org.springframework.context.annotation.Lazy
+    private com.example.mybill.boutique.payment.PaymentLinkService paymentLinkService;
 
     static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     static final int MAX_LIST = 100;
@@ -141,18 +143,23 @@ public class AgentOrderService {
             }
             orders = orderRepository.findByStatusOrderByCreatedAtDescOrderIdDesc(s, page);
         }
+        Map<Integer, BoutiqueOrderPayment> payments = paymentLinkService.latestByOrder(
+            orders.stream().map(BoutiqueOrder::getOrderId).toList());
         Map<Integer, BoutiqueCustomer> customers = customerRepository
             .findAllById(orders.stream().map(BoutiqueOrder::getCustomerId).collect(Collectors.toSet())).stream()
             .collect(Collectors.toMap(BoutiqueCustomer::getCustomerId, Function.identity()));
         return orders.stream().map(o -> {
             BoutiqueCustomer c = customers.get(o.getCustomerId());
             BoutiqueOrderItem first = o.getItems().isEmpty() ? null : o.getItems().get(0);
+            BoutiqueOrderPayment pay = payments.get(o.getOrderId());
             return new OrderSummary(o.getOrderNo(), o.getStatus().name(), o.getChannel(), o.getCustomerId(),
                 c == null ? null : c.getCustomerName(),
                 c == null ? null : (c.getPhoneE164() != null ? c.getPhoneE164() : c.getPhone()),
                 first == null ? null : first.getDesignCode(), first == null ? null : first.getDesignName(),
                 first == null ? null : first.getSizeCode(), first == null ? 0 : first.getQuantity(),
-                o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(), o.getCreatedAt());
+                o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(),
+                pay == null ? null : pay.getStatus(), o.getPaidAt(), pay == null ? null : pay.getRazorpayPaymentId(),
+                o.getCreatedAt());
         }).toList();
     }
 
@@ -230,7 +237,10 @@ public class AgentOrderService {
             o.getDeliveryPincode());
         return new OrderResponse(o.getOrderNo(), o.getStatus().name(), o.getCustomerId(), o.getChannel(), delivery,
             items, o.getSubtotal(), o.getDeliveryCharge(), o.getTotal(), PricingService.CURRENCY,
-            o.getEstimatedDeliveryDate(), o.getCreatedAt());
+            o.getEstimatedDeliveryDate(), o.getPaidAt(),
+            paymentLinkService.latestByOrder(List.of(o.getOrderId())).values().stream().findFirst()
+                .map(p -> paymentLinkService.toInfo(o, p)).orElse(null),
+            o.getCreatedAt());
     }
 
     private String toJson(Object value) {

@@ -37,8 +37,9 @@ public class TenantFilter extends OncePerRequestFilter {
             return;
         }
 
-        // Agent API — authenticated and tenant-scoped by AgentAuthFilter (Google ID token, fixed tenant)
-        if (path.startsWith("/api/agent/")) {
+        // Agent API — authenticated and tenant-scoped by AgentAuthFilter (Google ID token, fixed tenant).
+        // Razorpay webhooks (HMAC signature) and internal jobs (Google ID token) check auth themselves.
+        if (path.startsWith("/api/agent/") || path.startsWith("/webhooks/") || path.startsWith("/internal/")) {
             chain.doFilter(request, response);
             return;
         }

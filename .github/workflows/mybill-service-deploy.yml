@@ -68,6 +68,11 @@ jobs:
             AGENT_API_AUDIENCE=https://mybill-service-276371417285.us-central1.run.app
             AGENT_ALLOWED_SA_EMAIL=srisa-agent-sa@project-0708fb26-e204-4400-ae9.iam.gserviceaccount.com
             AGENT_TENANT_SCHEMA=firm_srisa
+            RAZORPAY_WEBHOOK_SECRET=${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+            PAYMENT_LINK_EXPIRY_HOURS=24
+            AGENT_EVENTS_URL=https://srisa-agent-276371417285.asia-south1.run.app
+            AGENT_EVENTS_AUDIENCE=https://srisa-agent-276371417285.asia-south1.run.app
+            RECONCILE_ALLOWED_SA_EMAIL=mybill-scheduler@project-0708fb26-e204-4400-ae9.iam.gserviceaccount.com
           flags: >
             --memory=4Gi
             --cpu=2

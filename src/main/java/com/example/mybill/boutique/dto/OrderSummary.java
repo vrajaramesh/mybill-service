@@ -11,4 +11,5 @@ import java.time.LocalDateTime;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record OrderSummary(String orderNo, String status, String channel, Integer customerId, String customerName,
                            String customerPhone, String designCode, String designName, String sizeCode, int qty,
-                           BigDecimal total, String currency, LocalDate estimatedDeliveryDate, LocalDateTime createdAt) {}
+                           BigDecimal total, String currency, LocalDate estimatedDeliveryDate, String paymentStatus,
+                           LocalDateTime paidAt, String razorpayPaymentId, LocalDateTime createdAt) {}

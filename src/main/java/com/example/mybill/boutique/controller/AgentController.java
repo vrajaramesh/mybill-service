@@ -1,6 +1,7 @@
 package com.example.mybill.boutique.controller;
 
 import com.example.mybill.boutique.dto.*;
+import com.example.mybill.boutique.payment.PaymentLinkService;
 import com.example.mybill.boutique.service.AgentCatalogService;
 import com.example.mybill.boutique.service.AgentCustomerService;
 import com.example.mybill.boutique.service.AgentOrderService;
@@ -24,6 +25,7 @@ public class AgentController {
     @Autowired private AgentCatalogService catalogService;
     @Autowired private AgentCustomerService customerService;
     @Autowired private AgentOrderService orderService;
+    @Autowired private PaymentLinkService paymentLinkService;
 
     /** Newest active designs, e.g. ?limit=4 (1..20). Declared before {code} for readability; Spring prefers literals. */
     @GetMapping("/designs/latest")
@@ -83,6 +85,17 @@ public class AgentController {
     public List<OrderSummary> orders(@RequestParam(required = false) String status,
                                      @RequestParam(defaultValue = "20") int limit) {
         return orderService.list(status, limit);
+    }
+
+    /** Razorpay Payment Link for the order: the active one, or a new one (amount = order total from the DB). */
+    @PostMapping("/orders/{orderNo}/payment-link")
+    public PaymentInfo paymentLink(@PathVariable String orderNo) {
+        return paymentLinkService.createOrGetLink(orderNo);
+    }
+
+    @GetMapping("/orders/{orderNo}/payment")
+    public PaymentInfo payment(@PathVariable String orderNo) {
+        return paymentLinkService.latestPayment(orderNo);
     }
 
     @GetMapping("/orders/{orderNo}")

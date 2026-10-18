@@ -36,7 +36,11 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
         "db/boutique/V1__boutique_catalog.sql",
         "db/boutique/V2__boutique_customers.sql",
         "db/boutique/V3__boutique_orders.sql",
-        "db/boutique/V4__boutique_order_delivery_estimate.sql");
+        "db/boutique/V4__boutique_order_delivery_estimate.sql",
+        "db/boutique/V5__boutique_order_payments.sql");
+
+    /** Public-schema objects (idempotent, run on every startup). */
+    static final String PUBLIC_SCRIPT = "db/boutique/public_razorpay_webhook_events.sql";
 
     private final Set<String> readySchemas = ConcurrentHashMap.newKeySet();
 
@@ -45,6 +49,11 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        try (Connection conn = dataSource.getConnection()) {
+            ScriptUtils.executeSqlScript(conn, new ClassPathResource(PUBLIC_SCRIPT));
+        } catch (Exception e) {
+            System.err.println("[BoutiqueSchema] Public schema objects failed: " + e.getMessage());
+        }
         for (Firm firm : firmRepository.findAll()) {
             String schema = firm.getSchemaName();
             if (schema == null || schema.isBlank()) continue;

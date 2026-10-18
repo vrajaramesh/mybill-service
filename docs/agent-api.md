@@ -271,9 +271,106 @@ A superadmin token without a firm gets 403. Google ID tokens are not accepted he
 
 Returns the order in the same shape as the create response (`SB-1001`; not case-sensitive). Returns 404 `ORDER_NOT_FOUND` if it doesn't exist.
 
+## Payments (Razorpay Payment Links)
+
+mybill owns all payment logic. srisa-agent only asks for a link and receives notifications.
+
+```
+POST /api/agent/orders/{orderNo}/payment-link ──▶ Razorpay POST /v1/payment_links ──▶ short_url to the customer
+customer pays ──▶ Razorpay ──▶ POST /webhooks/razorpay (HMAC) ──▶ payment paid, order PAID, stitching order
+                                                               └──▶ POST {AGENT_EVENTS_URL}/internal/events
+Cloud Scheduler (every 10 min) ──▶ POST /internal/jobs/reconcile-payments ──▶ catches missed webhooks
+```
+
+**Order statuses only move forward:** `DRAFT → PAYMENT_PENDING → PAID → IN_STITCHING → DISPATCHED → DELIVERED`, and `CANCELLED` only before payment. A late or duplicate webhook can never move an order back.
+
+### `POST /api/agent/orders/{orderNo}/payment-link`
+
+Returns the order's active link (status `created`, not expired). If there isn't one, it creates a Razorpay link:
+- **Amount:** the order total from the database, in paise. It never comes from the request.
+- **Reference:** `reference_id` is the order number. Replacement links use `SB-1001-2`, `-3`, and so on.
+- **Expiry:** `expire_by` = now + `PAYMENT_LINK_EXPIRY_HOURS` (default 24).
+- **Other settings:** Razorpay's own SMS and email notifications are off. `notes` carries `order_no`, `customer_id` and `tenant`.
+
+The order moves `DRAFT → PAYMENT_PENDING`. PAID or CANCELLED orders get 409 `ORDER_NOT_PAYABLE`. If Razorpay is down or rejects the request: 503 `PAYMENT_PROVIDER_UNAVAILABLE` or 502 `PAYMENT_PROVIDER_REJECTED`.
+
+```json
+{ "order_no": "SB-1001", "order_status": "PAYMENT_PENDING", "status": "created",
+  "short_url": "https://rzp.io/i/AbC123", "amount": 2349.00, "currency": "INR",
+  "expires_at": "2026-10-19T12:00:00", "paid_at": null, "razorpay_payment_id": null, "needs_review": false }
+```
+
+### `GET /api/agent/orders/{orderNo}/payment`
+
+Returns the latest link, in the same shape as above. Returns 404 `PAYMENT_NOT_FOUND` if no link exists yet. Order responses (`GET /orders/{orderNo}`) also include `paid_at` and a `payment` object. Order lists include `payment_status`, `paid_at` and `razorpay_payment_id`.
+
+### Webhook `POST /webhooks/razorpay` (public; called by Razorpay)
+
+1. **Signature:** `X-Razorpay-Signature` must equal `hex(HMAC_SHA256(raw body, RAZORPAY_WEBHOOK_SECRET))`, compared in constant time. Otherwise the response is 400.
+2. **Deduplication:** by `x-razorpay-event-id` in `public.razorpay_webhook_events`. An event that was already processed returns 200 without being processed again.
+3. **`payment_link.paid`:**
+   - The amount paid must equal the requested amount, in INR. **If it doesn't, the payment is not marked paid:** it gets `needs_review` and an ERROR is logged.
+   - Otherwise the payment becomes `paid`, the order becomes `PAID`, and a **stitching order** is created in the tailors' Boutique queue.
+   - srisa-agent is notified with `order.paid`.
+4. **`payment_link.expired` / `.cancelled`:** the link is marked; the order stays `PAYMENT_PENDING`, and srisa-agent is notified. If the link was already paid (events out of order), nothing changes.
+5. **Failures and speed:** a processing failure returns 500 so Razorpay retries. Agent notifications run after the commit, in the background (3 tries with backoff), so Razorpay never waits.
+
+**GST invoice: TODO.** The billing module creates retail bills from product line items, which doesn't fit a made-to-order garment, so no bill is created automatically yet.
+
+### `POST /internal/jobs/reconcile-payments` (Cloud Scheduler)
+
+This needs a Google ID token for `RECONCILE_ALLOWED_SA_EMAIL`, with audience `AGENT_API_AUDIENCE`. For every firm, it fetches links that are still `created`, older than 5 minutes and not expired. Any that Razorpay reports as `paid` get the same handling as the webhook; expired or cancelled links are marked too. The response is `{"checked", "marked_paid", "marked_closed", "errors"}`.
+
+### Configuration
+
+| Env var | Notes |
+|---|---|
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Already used by the ecom checkout. **Test keys (`rzp_test_…`) create test links.** |
+| `RAZORPAY_WEBHOOK_SECRET` | The secret you enter when creating the webhook in the Razorpay dashboard |
+| `PAYMENT_LINK_EXPIRY_HOURS` | Default 24 |
+| `PAYMENT_CALLBACK_URL` | Optional "thank you" page the customer is sent to after paying (`callback_method=get`). Empty means Razorpay's own success page. |
+| `AGENT_EVENTS_URL` / `AGENT_EVENTS_AUDIENCE` | `https://srisa-agent-276371417285.asia-south1.run.app` for both |
+| `RECONCILE_ALLOWED_SA_EMAIL` | Cloud Scheduler's service account |
+
+### One-time setup
+
+```bash
+PROJECT=project-0708fb26-e204-4400-ae9
+MYBILL=https://mybill-service-276371417285.us-central1.run.app
+gcloud services enable cloudscheduler.googleapis.com --project=$PROJECT
+gcloud iam service-accounts create mybill-scheduler --display-name="mybill Cloud Scheduler" --project=$PROJECT
+gcloud scheduler jobs create http reconcile-boutique-payments --project=$PROJECT --location=us-central1 \
+  --schedule="*/10 * * * *" --time-zone="Asia/Kolkata" --http-method=POST \
+  --uri="$MYBILL/internal/jobs/reconcile-payments" \
+  --oidc-service-account-email=mybill-scheduler@$PROJECT.iam.gserviceaccount.com --oidc-token-audience="$MYBILL"
+```
+
+In the **Razorpay Dashboard → Settings → Webhooks → Add New Webhook**:
+- URL: `$MYBILL/webhooks/razorpay`
+- Secret: the value of `RAZORPAY_WEBHOOK_SECRET`
+- Active events: `payment_link.paid`, `payment_link.expired`, `payment_link.cancelled`
+
+Webhooks are configured separately for Test and Live mode.
+
+### Testing with Razorpay test mode
+
+1. **Use test keys.** Locally, `application-local.properties` already has `rzp_test_…` keys and the webhook secret `local-test-webhook-secret`. In production the keys come from GitHub secrets: if they're live keys, links are **real** payment requests.
+2. **Create a link** for a DRAFT order, then open the `short_url`. In test mode you can pay with UPI id `success@razorpay`, or the test card `4111 1111 1111 1111` with any future expiry and any CVV.
+3. **Webhooks need a public URL.** For local testing, either expose your Mac with `cloudflared tunnel --url http://localhost:8080` and add a **Test mode** webhook pointing at `<tunnel>/webhooks/razorpay`, or simulate the webhook with curl:
+
+   ```bash
+   BODY='{"event":"payment_link.paid","payload":{"payment_link":{"entity":{"id":"plink_XXXX","amount_paid":234900,"currency":"INR","notes":{"tenant":"firm_srisa"}}},"payment":{"entity":{"id":"pay_TEST1","created_at":1760700000}}}}'
+   SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac local-test-webhook-secret | sed 's/^.* //')
+   curl -i -X POST http://localhost:8080/webhooks/razorpay -H "Content-Type: application/json" \
+     -H "X-Razorpay-Signature: $SIG" -H "x-razorpay-event-id: evt_local_1" --data-binary "$BODY"
+   ```
+
+   Replace `plink_XXXX` with the link id stored in `boutique_order_payments`, and `amount_paid` with the order total in paise.
+4. **Check the result:** the order shows **Paid** in mybill-ui → Boutique Orders, and a new stitching order appears in Boutique. Run the reconciliation job by hand with `curl -X POST localhost:8080/internal/jobs/reconcile-payments` (the local profile skips its token check).
+
 ## Data model notes
 
-The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V4`. That happens on startup, and also on the first agent call for a firm registered later.
+The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V5`. That happens on startup, and also on the first agent call for a firm registered later.
 
 | Table | Notes |
 |---|---|
@@ -283,7 +380,8 @@ The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from 
 | `size_chart` | New. Filled with a standard XS–XXL chart, but only if the table is empty. |
 | `customers` | Gets new columns `phone_e164` and `instagram_user_id` (both unique where not empty), `source` (existing rows are `SHOP`) and `updated_at`. `phone_e164` was filled from the old phone column wherever the result was unambiguous. Numbers shared by several customers were left empty, and the startup log says how many. |
 | `customer_measurements` | Gets new columns `size_code`, `height_cm`, `fit_preference`, `source`. The API's `bust_in` is stored in the existing `chest` column. |
-| `boutique_orders`, `boutique_order_items` | New. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
+| `boutique_order_payments` | V5: one row per Razorpay Payment Link (amount in paise, status, payment id, `needs_review`). Separate from the tailors' `boutique_payments`. |
+| `boutique_orders`, `boutique_order_items` | New. V5 adds `PAYMENT_PENDING` and `paid_at`. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
 
 Sample data for testing (`KUR-101..103` plus options) is in `src/main/resources/db/boutique/dev-seed.sql`. It is **not** run automatically:
 

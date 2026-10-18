@@ -21,5 +21,7 @@ public record OrderResponse(
     BigDecimal total,
     String currency,
     LocalDate estimatedDeliveryDate,
+    LocalDateTime paidAt,
+    PaymentInfo payment,
     LocalDateTime createdAt
 ) {}

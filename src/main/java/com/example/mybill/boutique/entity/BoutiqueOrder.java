@@ -57,6 +57,9 @@ public class BoutiqueOrder {
     @Column(name = "estimated_delivery_date")
     private java.time.LocalDate estimatedDeliveryDate;
 
+    @Column(name = "paid_at")
+    private LocalDateTime paidAt;
+
     @Column(name = "stitching_order_id")
     private Integer stitchingOrderId;
 
@@ -109,6 +112,8 @@ public class BoutiqueOrder {
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
     public java.time.LocalDate getEstimatedDeliveryDate() { return estimatedDeliveryDate; }
     public void setEstimatedDeliveryDate(java.time.LocalDate v) { this.estimatedDeliveryDate = v; }
+    public LocalDateTime getPaidAt() { return paidAt; }
+    public void setPaidAt(LocalDateTime v) { this.paidAt = v; }
     public Integer getStitchingOrderId() { return stitchingOrderId; }
     public void setStitchingOrderId(Integer stitchingOrderId) { this.stitchingOrderId = stitchingOrderId; }
     public LocalDateTime getCreatedAt() { return createdAt; }
