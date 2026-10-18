@@ -93,7 +93,9 @@ public class MarketingService {
         link.setDesignCode(design.getCode());
         link.setLabel(request.label().trim());
         if (request.active() != null) link.setActive(request.active());
-        link.setPermalink(uniquePermalink(request.sourceType(), request.permalink(), link.getLinkId()));
+        if (request.permalink() != null) {   // omitted (e.g. the mybill-ui form) = keep; "" = clear
+            link.setPermalink(uniquePermalink(request.sourceType(), request.permalink(), link.getLinkId()));
+        }
         link.setCreatedBy(MarketingLink.MANUAL);   // edited by staff: the Instagram sync leaves it alone from now on
         link.setUpdatedAt(LocalDateTime.now());
         return toResponse(linkRepository.save(link), design.displayName());

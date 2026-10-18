@@ -244,6 +244,15 @@ class InstagramSupportIntegrationTest extends AbstractFirmIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT design_code FROM " + s + "marketing_links WHERE source_id = '8001'", String.class))
             .isEqualTo("KUR-402");
 
+        // Staff editing the link without a permalink (mybill-ui form) keeps it, and takes ownership (MANUAL).
+        Integer link8001 = jdbc.queryForObject("SELECT link_id FROM " + s + "marketing_links WHERE source_id = '8001'", Integer.class);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put("/api/boutique-marketing/links/" + link8001)
+                .header("Authorization", firm.bearer()).contentType(MediaType.APPLICATION_JSON).content("""
+                    {"source_type":"IG_MEDIA","source_id":"8001","design_code":"KUR-402","label":"Staff renamed"}"""))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.permalink").value("https://instagram.com/p/AbC123"))
+            .andExpect(jsonPath("$.created_by").value("MANUAL"));
+
         // Resolve by permalink: www / query / trailing slash don't matter.
         agent(get("/api/agent/marketing-links/resolve").param("type", "IG_MEDIA")
                 .param("permalink", "https://instagram.com/p/AbC123?igsh=MWQ1ZGUxMzBkMA=="))
