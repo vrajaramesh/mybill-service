@@ -14,6 +14,9 @@ public record MarketingLinkResponse(
     String designName,
     String label,
     boolean active,
+    String permalink,
+    /** MANUAL (staff, never changed by the Instagram sync) or AUTO (sync-ig-media). */
+    String createdBy,
     LocalDateTime createdAt,
     LocalDateTime updatedAt
 ) {}

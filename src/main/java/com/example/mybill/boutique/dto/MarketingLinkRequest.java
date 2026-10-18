@@ -24,5 +24,9 @@ public record MarketingLinkRequest(
     @Size(max = 150, message = "label must be at most 150 characters")
     String label,
 
-    Boolean active
+    Boolean active,
+
+    /** Optional Instagram post URL (IG_MEDIA), so the agent can resolve the post by its link. */
+    @Size(max = 500, message = "permalink must be at most 500 characters")
+    String permalink
 ) {}

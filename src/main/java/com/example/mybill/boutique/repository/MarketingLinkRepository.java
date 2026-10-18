@@ -10,5 +10,7 @@ public interface MarketingLinkRepository extends JpaRepository<MarketingLink, In
 
     Optional<MarketingLink> findBySourceTypeAndSourceId(String sourceType, String sourceId);
 
+    Optional<MarketingLink> findBySourceTypeAndPermalink(String sourceType, String permalink);
+
     List<MarketingLink> findAllByOrderByActiveDescCreatedAtDescLinkIdDesc();
 }

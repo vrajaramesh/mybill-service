@@ -63,6 +63,12 @@ public class AgentController {
         return ResponseEntity.status(HttpStatus.CREATED).body(customerService.saveMeasurement(id, request));
     }
 
+    /** Her answer to WhatsApp updates/offers (latest wins); stored with the time. */
+    @PostMapping("/customers/{id}/consent")
+    public CustomerResponse consent(@PathVariable Integer id, @Valid @RequestBody ConsentRequest request) {
+        return customerService.setConsent(id, request.whatsappUpdates());
+    }
+
     @PostMapping("/orders/quote")
     public QuoteResponse quote(@Valid @RequestBody QuoteRequest request) {
         return orderService.quote(request);
@@ -105,10 +111,21 @@ public class AgentController {
         return orderService.get(orderNo);
     }
 
-    /** Design promoted by a Click-to-WhatsApp ad / Instagram post, e.g. ?type=AD&id=1202... (active links only). */
+    /**
+     * Design promoted by a Click-to-WhatsApp ad / Instagram post (active links only):
+     * ?type=AD&id=1202... or ?type=IG_MEDIA&permalink=https://www.instagram.com/p/...
+     */
     @GetMapping("/marketing-links/resolve")
-    public MarketingLinkResolveResponse resolveMarketingLink(@RequestParam String type, @RequestParam String id) {
-        return marketingService.resolve(type, id);
+    public MarketingLinkResolveResponse resolveMarketingLink(@RequestParam String type,
+                                                             @RequestParam(required = false) String id,
+                                                             @RequestParam(required = false) String permalink) {
+        return marketingService.resolve(type, id, permalink);
+    }
+
+    /** Auto-links Instagram posts whose caption names a design (never touches links staff created). */
+    @PostMapping("/marketing-links/sync-ig-media")
+    public IgMediaSyncResponse syncIgMedia(@RequestBody List<IgMediaItem> items) {
+        return marketingService.syncIgMedia(items);
     }
 
     /** 201 for a new event; 200 with the original when the ctwa_clid was already reported. */

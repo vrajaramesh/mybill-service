@@ -11,6 +11,9 @@ public class MarketingLink {
 
     public static final String AD = "AD";
     public static final String IG_MEDIA = "IG_MEDIA";
+    /** Created by staff in mybill-ui (never touched by the Instagram sync) vs by sync-ig-media. */
+    public static final String MANUAL = "MANUAL";
+    public static final String AUTO = "AUTO";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,6 +32,13 @@ public class MarketingLink {
 
     @Column(name = "label", nullable = false, length = 150)
     private String label;
+
+    /** Instagram post URL (normalised: no query, no trailing slash, no "www."), for resolve by permalink. */
+    @Column(name = "permalink", length = 500)
+    private String permalink;
+
+    @Column(name = "created_by", nullable = false, length = 10)
+    private String createdBy = MANUAL;
 
     @Column(name = "active", nullable = false)
     private boolean active = true;
@@ -49,6 +59,10 @@ public class MarketingLink {
     public void setDesignCode(String designCode) { this.designCode = designCode; }
     public String getLabel() { return label; }
     public void setLabel(String label) { this.label = label; }
+    public String getPermalink() { return permalink; }
+    public void setPermalink(String permalink) { this.permalink = permalink; }
+    public String getCreatedBy() { return createdBy; }
+    public void setCreatedBy(String createdBy) { this.createdBy = createdBy; }
     public boolean isActive() { return active; }
     public void setActive(boolean active) { this.active = active; }
     public LocalDateTime getCreatedAt() { return createdAt; }

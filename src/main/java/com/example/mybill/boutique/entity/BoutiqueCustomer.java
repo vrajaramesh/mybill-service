@@ -36,6 +36,13 @@ public class BoutiqueCustomer {
     @Column(name = "source", nullable = false, length = 20)
     private String source = "SHOP";
 
+    /** Opted in (true) / out (false) of WhatsApp order updates and offers; NULL = never asked. */
+    @Column(name = "whatsapp_updates_consent")
+    private Boolean whatsappUpdatesConsent;
+
+    @Column(name = "consent_at")
+    private LocalDateTime consentAt;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -54,6 +61,10 @@ public class BoutiqueCustomer {
     public void setInstagramUserId(String instagramUserId) { this.instagramUserId = instagramUserId; }
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
+    public Boolean getWhatsappUpdatesConsent() { return whatsappUpdatesConsent; }
+    public void setWhatsappUpdatesConsent(Boolean v) { this.whatsappUpdatesConsent = v; }
+    public LocalDateTime getConsentAt() { return consentAt; }
+    public void setConsentAt(LocalDateTime v) { this.consentAt = v; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }

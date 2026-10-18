@@ -142,12 +142,30 @@ How the customer is found:
 3. Otherwise, for +91 numbers, an existing shop customer whose old free-text phone is the same 10 digits and who isn't linked yet (the newest one, if several match).
 4. Otherwise, a new customer is created (`source` is `WHATSAPP`, or `INSTAGRAM` if there's no phone).
 
-Fields that are empty on the customer are filled in. **Existing values are never overwritten.** The response is **201** if a customer was created and **200** if one was found. If the phone or Instagram id already belongs to a *different* customer, the response is 409.
+Fields that are empty on the customer are filled in. **Existing values are never overwritten.** The response is **201** if a customer was created and **200** if one was found.
+
+**Merging.** If both `phone_e164` and `instagram_user_id` are sent and they belong to two different customers, the two are merged into one before anything else:
+
+- The **older** customer (lower `customer_id`) is kept. Everything that pointed at the other one is moved to it: measurements, boutique orders, stitching orders, bills and marketing events.
+- The other customer row is deleted. The kept one gets both identities, and fills its empty name, phone and consent from the deleted one.
+- The merge is logged in `customer_merges`, with the moved row counts and a JSON copy of the deleted row. The response's `merged_customer_id` says which id no longer exists.
+- If either customer already has a *different* phone or Instagram id than the one sent, they are **not** merged: 409 `IDENTITY_CONFLICT`.
+
+Other cases where the phone or Instagram id already belongs to a different customer still return 409 (`PHONE_IN_USE` / `INSTAGRAM_IN_USE`).
 
 ```json
 { "customer_id": 512, "name": "Asha Rao", "phone_e164": "+919876543210", "instagram_user_id": "17841400000000000",
-  "source": "WHATSAPP", "created": true, "created_at": "2026-10-17T18:02:11", "updated_at": "2026-10-17T18:02:11" }
+  "source": "WHATSAPP", "created": false, "merged_customer_id": 731,
+  "whatsapp_updates_consent": null, "consent_at": null,
+  "created_at": "2026-10-17T18:02:11", "updated_at": "2026-10-18T09:12:40" }
 ```
+
+### `POST /api/agent/customers/{id}/consent`
+
+`{"whatsapp_updates": true}` or `false`: her answer to "may we send you order updates and offers on WhatsApp?". The latest answer wins and is stored with `consent_at`. `whatsapp_updates_consent` is `null` until she has been asked.
+
+- Response **200**: the customer, as above.
+- 400 without `whatsapp_updates`; 404 `CUSTOMER_NOT_FOUND`.
 
 ### `GET /api/agent/customers/{id}/measurements`
 
@@ -381,7 +399,41 @@ mybill-ui → **Ad performance** puts it together.
 
 ### `GET /api/agent/marketing-links/resolve?type=AD&id=120210000000000001`
 
-**200** `{"design_code": "KUR-301", "label": "Mustard kurti reel – Diwali boost"}`. Only **active** links resolve; unknown and deactivated links both return 404 `MARKETING_LINK_NOT_FOUND`. A `type` other than `AD`/`IG_MEDIA` is 400.
+Also `?type=IG_MEDIA&permalink=https://www.instagram.com/p/AbC123/`, e.g. for a post the customer shared.
+
+**200** `{"design_code": "KUR-301", "label": "Mustard kurti reel – Diwali boost"}`.
+
+- `id` or `permalink` is required. With both, `id` is used.
+- Permalinks are compared without the query string (`?igsh=…`), fragment, trailing slash and `www.`.
+- Only **active** links resolve: unknown and deactivated links both return 404 `MARKETING_LINK_NOT_FOUND`.
+- A `type` other than `AD`/`IG_MEDIA`, or neither `id` nor `permalink`, is 400.
+
+### `POST /api/agent/marketing-links/sync-ig-media`
+
+Auto-links Instagram posts to designs from their captions. The body is up to 200 posts as returned by the Instagram Graph API:
+
+```json
+[{ "media_id": "17912345678901234", "permalink": "https://www.instagram.com/p/AbC123/",
+   "caption": "Festive pick ✨ Code: KUR-301 — DM to order!", "media_type": "IMAGE",
+   "timestamp": "2026-10-18T05:00:00+0000" }]
+```
+
+For each post:
+
+1. **The design code** is the one right after `Code:` (any case, also `Code -`) if present, otherwise the first `[A-Z]{3}-\d+` in the caption.
+2. **If that design exists**, an `IG_MEDIA` link is created or updated:
+   - `source_id` is the `media_id` and `label` is the first 60 characters of the caption (whitespace collapsed).
+   - It's marked `created_by = AUTO`, and the permalink is stored.
+3. **Links staff created or edited** in mybill-ui (`created_by = MANUAL`) are **never changed**. Deactivated AUTO links are updated but stay deactivated.
+
+Response **200**:
+
+```json
+{ "created": 2, "updated": 1, "skipped": 3,
+  "items": [{ "media_id": "17912345678901234", "result": "created", "design_code": "KUR-301", "reason": null }, …] }
+```
+
+`reason` for skipped posts: `invalid_media_id`, `no_design_code`, `design_not_found`, `manual_link`, `unchanged` or `permalink_in_use`. Re-sending the same posts is safe.
 
 ### `POST /api/agent/marketing-events`
 
@@ -398,8 +450,8 @@ mybill-ui → **Ad performance** puts it together.
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/links` | All links, active first. Includes `design_name`. |
-| POST | `/links` | `{source_type, source_id, design_code, label, active?}` → 201. `source_id` must be numeric (400), the design must exist (422 `DESIGN_NOT_FOUND`), one link per type + id (409 `MARKETING_LINK_EXISTS`). |
-| PUT | `/links/{id}` | Same body; `active` omitted = unchanged. |
+| POST | `/links` | `{source_type, source_id, design_code, label, active?, permalink?}` → 201 (`created_by` MANUAL; a permalink used by another link → 409 `PERMALINK_IN_USE`). `source_id` must be numeric (400), the design must exist (422 `DESIGN_NOT_FOUND`), one link per type + id (409 `MARKETING_LINK_EXISTS`). |
+| PUT | `/links/{id}` | Same body; `active` omitted = unchanged. Editing an AUTO link makes it MANUAL, so the Instagram sync leaves it alone from then on. |
 | POST | `/links/{id}/deactivate`, `/links/{id}/activate` | Soft delete; deactivated links stop resolving but stay in the report. |
 | GET | `/designs` | Design picker: `[{code, name, active}]`. |
 | GET | `/report?from=2026-10-01&to=2026-10-18` | IST dates, inclusive, default the last 30 days, at most 366 days. |
@@ -415,7 +467,7 @@ The report has one row per link (inactive ones too) plus **Unmapped/other**, and
 
 ## Data model notes
 
-The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V6`. That happens on startup, and also on the first agent call for a firm registered later.
+The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V7`. That happens on startup, and also on the first agent call for a firm registered later.
 
 | Table | Notes |
 |---|---|
@@ -427,6 +479,8 @@ The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from 
 | `customer_measurements` | Gets new columns `size_code`, `height_cm`, `fit_preference`, `source`. The API's `bust_in` is stored in the existing `chest` column. |
 | `boutique_order_payments` | V5: one row per Razorpay Payment Link (amount in paise, status, payment id, `needs_review`). Separate from the tailors' `boutique_payments`. |
 | `marketing_links` | V6: `source_type` (`AD`/`IG_MEDIA`) + numeric `source_id` (unique together) → `design_code` (FK to `boutique_designs.code`), `label`, `active`. |
+| `customer_merges` | V7: audit of customers merged by the agent upsert (`kept_customer_id`, `merged_customer_id`, identities, `moved` row counts, `merged_customer` JSON copy of the deleted row). |
+| `marketing_links` (V7) | Adds `permalink` (normalised, unique per type) and `created_by` (`MANUAL` / `AUTO`). `customers` gets `whatsapp_updates_consent` (NULL = never asked) and `consent_at`. |
 | `marketing_events` | V6: `conversation_started` events from the agent (`source_type`, `source_id`, `ctwa_clid` unique, `customer_id`, `occurred_at`). |
 | `boutique_orders`, `boutique_order_items` | New. V6 adds nullable `source_type`, `source_id`, `ctwa_clid`. V5 adds `PAYMENT_PENDING` and `paid_at`. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
 

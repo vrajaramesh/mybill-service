@@ -7,4 +7,8 @@ import java.time.LocalDateTime;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record CustomerResponse(Integer customerId, String name, String phoneE164, String instagramUserId,
-                               String source, boolean created, LocalDateTime createdAt, LocalDateTime updatedAt) {}
+                               String source, boolean created,
+                               /** Set when this upsert merged another customer into this one (that id no longer exists). */
+                               Integer mergedCustomerId,
+                               Boolean whatsappUpdatesConsent, LocalDateTime consentAt,
+                               LocalDateTime createdAt, LocalDateTime updatedAt) {}

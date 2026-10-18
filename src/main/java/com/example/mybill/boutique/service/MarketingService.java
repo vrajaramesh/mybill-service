@@ -18,6 +18,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -71,6 +73,8 @@ public class MarketingService {
         link.setDesignCode(design.getCode());
         link.setLabel(request.label().trim());
         link.setActive(request.active() == null || request.active());
+        link.setPermalink(uniquePermalink(request.sourceType(), request.permalink(), null));
+        link.setCreatedBy(MarketingLink.MANUAL);
         link.setCreatedAt(now);
         link.setUpdatedAt(now);
         return toResponse(linkRepository.save(link), design.displayName());
@@ -89,6 +93,8 @@ public class MarketingService {
         link.setDesignCode(design.getCode());
         link.setLabel(request.label().trim());
         if (request.active() != null) link.setActive(request.active());
+        link.setPermalink(uniquePermalink(request.sourceType(), request.permalink(), link.getLinkId()));
+        link.setCreatedBy(MarketingLink.MANUAL);   // edited by staff: the Instagram sync leaves it alone from now on
         link.setUpdatedAt(LocalDateTime.now());
         return toResponse(linkRepository.save(link), design.displayName());
     }
@@ -104,20 +110,158 @@ public class MarketingService {
 
     // ── Agent ────────────────────────────────────────────────────────────────
 
-    /** Only active links resolve; unknown and inactive ones are both 404 (the agent treats them alike). */
+    /**
+     * By source id, or (e.g. a shared Instagram post) by permalink. Only active links resolve; unknown and inactive
+     * ones are both 404 (the agent treats them alike).
+     */
     @Transactional(readOnly = true)
-    public MarketingLinkResolveResponse resolve(String type, String id) {
+    public MarketingLinkResolveResponse resolve(String type, String id, String permalink) {
         String sourceType = type == null ? "" : type.trim().toUpperCase(Locale.ROOT);
-        String sourceId = id == null ? "" : id.trim();
         if (!sourceType.equals(MarketingLink.AD) && !sourceType.equals(MarketingLink.IG_MEDIA)) {
             throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "type must be AD or IG_MEDIA",
                 Map.of("type", String.valueOf(type)));
         }
-        return linkRepository.findBySourceTypeAndSourceId(sourceType, sourceId)
-            .filter(MarketingLink::isActive)
+        String sourceId = id == null ? "" : id.trim();
+        String url = normalisePermalink(permalink);
+        if (sourceId.isEmpty() && url == null) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "id or permalink is required", null);
+        }
+        Optional<MarketingLink> link = !sourceId.isEmpty()
+            ? linkRepository.findBySourceTypeAndSourceId(sourceType, sourceId)
+            : linkRepository.findBySourceTypeAndPermalink(sourceType, url);
+        return link.filter(MarketingLink::isActive)
             .map(l -> new MarketingLinkResolveResponse(l.getDesignCode(), l.getLabel()))
             .orElseThrow(() -> AgentApiException.notFound("MARKETING_LINK_NOT_FOUND",
-                "No active marketing link for " + sourceType + " " + sourceId));
+                "No active marketing link for " + sourceType + " " + (sourceId.isEmpty() ? url : sourceId)));
+    }
+
+    // ── Instagram sync ───────────────────────────────────────────────────────
+
+    static final int MAX_SYNC_ITEMS = 200;
+    static final int LABEL_CHARS = 60;
+    private static final Pattern CODE_AFTER_LABEL = Pattern.compile("(?i)\\bcode\\s*[:\\-]\\s*([A-Z]{3}-\\d+)\\b");
+    private static final Pattern ANY_CODE = Pattern.compile("\\b([A-Z]{3}-\\d+)\\b");
+
+    /** The design code a caption is about: the one after "Code:" if present, else the first one. */
+    static String designCodeIn(String caption) {
+        if (caption == null) return null;
+        Matcher labelled = CODE_AFTER_LABEL.matcher(caption);
+        if (labelled.find()) return labelled.group(1).toUpperCase(Locale.ROOT);
+        Matcher any = ANY_CODE.matcher(caption);
+        return any.find() ? any.group(1) : null;
+    }
+
+    /**
+     * Upserts an AUTO IG_MEDIA link per post whose caption names an existing design. Links created or edited by
+     * staff (MANUAL) are never changed; deactivated AUTO links stay deactivated.
+     */
+    @Transactional
+    public IgMediaSyncResponse syncIgMedia(List<IgMediaItem> items) {
+        if (items == null || items.isEmpty()) return new IgMediaSyncResponse(0, 0, 0, List.of());
+        if (items.size() > MAX_SYNC_ITEMS) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                "At most " + MAX_SYNC_ITEMS + " posts per request", Map.of("count", items.size()));
+        }
+        List<IgMediaSyncResponse.Item> out = new ArrayList<>();
+        int created = 0, updated = 0, skipped = 0;
+        for (IgMediaItem item : items) {
+            IgMediaSyncResponse.Item r = syncOne(item);
+            out.add(r);
+            switch (r.result()) {
+                case "created" -> created++;
+                case "updated" -> updated++;
+                default -> skipped++;
+            }
+        }
+        return new IgMediaSyncResponse(created, updated, skipped, out);
+    }
+
+    private IgMediaSyncResponse.Item syncOne(IgMediaItem item) {
+        String mediaId = item == null || item.mediaId() == null ? "" : item.mediaId().trim();
+        if (!mediaId.matches("[0-9]{1,40}")) return skip(mediaId, null, "invalid_media_id");
+        String code = designCodeIn(item.caption());
+        if (code == null) return skip(mediaId, null, "no_design_code");
+        Optional<BoutiqueDesign> design = designRepository.findByCodeIgnoreCase(code);
+        if (design.isEmpty()) return skip(mediaId, code, "design_not_found");
+        String designCode = design.get().getCode();
+
+        Optional<MarketingLink> existing = linkRepository.findBySourceTypeAndSourceId(MarketingLink.IG_MEDIA, mediaId);
+        if (existing.isPresent() && MarketingLink.MANUAL.equals(existing.get().getCreatedBy())) {
+            return skip(mediaId, designCode, "manual_link");
+        }
+        String url = normalisePermalink(item.permalink());
+        if (url != null) {
+            Optional<MarketingLink> owner = linkRepository.findBySourceTypeAndPermalink(MarketingLink.IG_MEDIA, url);
+            if (owner.isPresent() && (existing.isEmpty() || !owner.get().getLinkId().equals(existing.get().getLinkId()))) {
+                return skip(mediaId, designCode, "permalink_in_use");
+            }
+        }
+        String label = captionLabel(item.caption());
+        LocalDateTime now = LocalDateTime.now();
+        if (existing.isEmpty()) {
+            MarketingLink link = new MarketingLink();
+            link.setSourceType(MarketingLink.IG_MEDIA);
+            link.setSourceId(mediaId);
+            link.setDesignCode(designCode);
+            link.setLabel(label);
+            link.setPermalink(url);
+            link.setCreatedBy(MarketingLink.AUTO);
+            link.setActive(true);
+            link.setCreatedAt(now);
+            link.setUpdatedAt(now);
+            linkRepository.save(link);
+            return new IgMediaSyncResponse.Item(mediaId, "created", designCode, null);
+        }
+        MarketingLink link = existing.get();
+        String newUrl = url != null ? url : link.getPermalink();
+        if (designCode.equals(link.getDesignCode()) && label.equals(link.getLabel())
+                && java.util.Objects.equals(newUrl, link.getPermalink())) {
+            return skip(mediaId, designCode, "unchanged");
+        }
+        link.setDesignCode(designCode);
+        link.setLabel(label);
+        link.setPermalink(newUrl);
+        link.setUpdatedAt(now);
+        linkRepository.save(link);
+        return new IgMediaSyncResponse.Item(mediaId, "updated", designCode, null);
+    }
+
+    private static IgMediaSyncResponse.Item skip(String mediaId, String code, String reason) {
+        return new IgMediaSyncResponse.Item(mediaId, "skipped", code, reason);
+    }
+
+    /** First 60 characters of the caption, whitespace collapsed (emoji kept whole). */
+    static String captionLabel(String caption) {
+        String text = caption == null ? "" : caption.replaceAll("\\s+", " ").trim();
+        if (text.codePointCount(0, text.length()) <= LABEL_CHARS) return text;
+        return text.substring(0, text.offsetByCodePoints(0, LABEL_CHARS)).trim();
+    }
+
+    /**
+     * Instagram URLs compared without query/fragment, trailing slash and "www.", scheme/host lower-cased
+     * (the path is case-sensitive). null for blank input.
+     */
+    static String normalisePermalink(String permalink) {
+        if (permalink == null || permalink.isBlank()) return null;
+        String url = permalink.trim();
+        int cut = url.indexOf('?');
+        if (cut >= 0) url = url.substring(0, cut);
+        cut = url.indexOf('#');
+        if (cut >= 0) url = url.substring(0, cut);
+        Matcher m = Pattern.compile("(?i)^(https?)://(?:www\\.)?([^/]+)(.*)$").matcher(url);
+        if (m.matches()) url = "https://" + m.group(2).toLowerCase(Locale.ROOT) + m.group(3);
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        return url.isEmpty() ? null : url;
+    }
+
+    private String uniquePermalink(String sourceType, String permalink, Integer linkId) {
+        String url = normalisePermalink(permalink);
+        if (url == null) return null;
+        linkRepository.findBySourceTypeAndPermalink(sourceType, url)
+            .filter(other -> !other.getLinkId().equals(linkId))
+            .ifPresent(other -> { throw AgentApiException.conflict("PERMALINK_IN_USE",
+                "Another link already uses this permalink"); });
+        return url;
     }
 
     /** Idempotent on ctwa_clid when present: a repeat returns the first event with created = false. */
@@ -257,6 +401,6 @@ public class MarketingService {
 
     private static MarketingLinkResponse toResponse(MarketingLink l, String designName) {
         return new MarketingLinkResponse(l.getLinkId(), l.getSourceType(), l.getSourceId(), l.getDesignCode(),
-            designName, l.getLabel(), l.isActive(), l.getCreatedAt(), l.getUpdatedAt());
+            designName, l.getLabel(), l.isActive(), l.getPermalink(), l.getCreatedBy(), l.getCreatedAt(), l.getUpdatedAt());
     }
 }

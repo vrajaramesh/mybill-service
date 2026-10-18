@@ -27,18 +27,32 @@ public class AgentCustomerService {
     @Autowired private BoutiqueCustomerRepository customerRepository;
     @Autowired private BoutiqueMeasurementRepository measurementRepository;
     @Autowired private AgentCatalogService catalogService;
+    @Autowired private CustomerMergeService mergeService;
 
     public record UpsertResult(CustomerResponse customer, boolean created) {}
 
     /**
      * Find by phone, else by Instagram id, else (for Indian numbers) an existing shop customer whose
      * free-text phone matches; otherwise create. Only fills fields that are empty — never overwrites.
+     * When the phone and the Instagram id belong to two different customers, they are merged first
+     * (CustomerMergeService: the older one is kept).
      */
     @Transactional
     public UpsertResult upsert(CustomerUpsertRequest request) {
         String phone = blankToNull(request.phoneE164());
         String igId = blankToNull(request.instagramUserId());
         String name = blankToNull(request.name());
+
+        Integer mergedFrom = null;
+        if (phone != null && igId != null) {
+            Optional<BoutiqueCustomer> byPhone = customerRepository.findByPhoneE164(phone);
+            Optional<BoutiqueCustomer> byIg = customerRepository.findByInstagramUserId(igId);
+            if (byPhone.isPresent() && byIg.isPresent()
+                    && !byPhone.get().getCustomerId().equals(byIg.get().getCustomerId())) {
+                mergedFrom = mergeService.merge(byPhone.get().getCustomerId(), byIg.get().getCustomerId(), phone, igId)
+                    .mergedCustomerId();
+            }
+        }
 
         Optional<BoutiqueCustomer> match = Optional.empty();
         if (phone != null) match = customerRepository.findByPhoneE164(phone);
@@ -66,7 +80,19 @@ public class AgentCustomerService {
             customer.setCustomerName(name.length() > 100 ? name.substring(0, 100) : name);
         }
         customer.setUpdatedAt(LocalDateTime.now());
-        return new UpsertResult(toResponse(customerRepository.save(customer), created), created);
+        return new UpsertResult(toResponse(customerRepository.save(customer), created, mergedFrom), created);
+    }
+
+    /** Records her answer to "may we send you order updates and offers on WhatsApp?" (latest answer wins). */
+    @Transactional
+    public CustomerResponse setConsent(Integer customerId, boolean whatsappUpdates) {
+        BoutiqueCustomer customer = customerRepository.findById(customerId)
+            .orElseThrow(() -> AgentApiException.notFound("CUSTOMER_NOT_FOUND", "No customer with id " + customerId));
+        LocalDateTime now = LocalDateTime.now();
+        customer.setWhatsappUpdatesConsent(whatsappUpdates);
+        customer.setConsentAt(now);
+        customer.setUpdatedAt(now);
+        return toResponse(customerRepository.save(customer), false, null);
     }
 
     @Transactional(readOnly = true)
@@ -130,9 +156,10 @@ public class AgentCustomerService {
         return c;
     }
 
-    private CustomerResponse toResponse(BoutiqueCustomer c, boolean created) {
+    private CustomerResponse toResponse(BoutiqueCustomer c, boolean created, Integer mergedFrom) {
         return new CustomerResponse(c.getCustomerId(), c.getCustomerName(), c.getPhoneE164(), c.getInstagramUserId(),
-            c.getSource(), created, c.getCreatedAt(), c.getUpdatedAt());
+            c.getSource(), created, mergedFrom, c.getWhatsappUpdatesConsent(), c.getConsentAt(),
+            c.getCreatedAt(), c.getUpdatedAt());
     }
 
     private MeasurementResponse toResponse(BoutiqueMeasurement m) {
