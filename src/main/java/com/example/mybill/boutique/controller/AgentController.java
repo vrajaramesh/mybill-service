@@ -5,6 +5,7 @@ import com.example.mybill.boutique.payment.PaymentLinkService;
 import com.example.mybill.boutique.service.AgentCatalogService;
 import com.example.mybill.boutique.service.AgentCustomerService;
 import com.example.mybill.boutique.service.AgentOrderService;
+import com.example.mybill.boutique.service.MarketingService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -26,6 +27,7 @@ public class AgentController {
     @Autowired private AgentCustomerService customerService;
     @Autowired private AgentOrderService orderService;
     @Autowired private PaymentLinkService paymentLinkService;
+    @Autowired private MarketingService marketingService;
 
     /** Newest active designs, e.g. ?limit=4 (1..20). Declared before {code} for readability; Spring prefers literals. */
     @GetMapping("/designs/latest")
@@ -101,5 +103,18 @@ public class AgentController {
     @GetMapping("/orders/{orderNo}")
     public OrderResponse order(@PathVariable String orderNo) {
         return orderService.get(orderNo);
+    }
+
+    /** Design promoted by a Click-to-WhatsApp ad / Instagram post, e.g. ?type=AD&id=1202... (active links only). */
+    @GetMapping("/marketing-links/resolve")
+    public MarketingLinkResolveResponse resolveMarketingLink(@RequestParam String type, @RequestParam String id) {
+        return marketingService.resolve(type, id);
+    }
+
+    /** 201 for a new event; 200 with the original when the ctwa_clid was already reported. */
+    @PostMapping("/marketing-events")
+    public ResponseEntity<MarketingEventResponse> marketingEvent(@Valid @RequestBody MarketingEventRequest request) {
+        MarketingEventResponse result = marketingService.recordEvent(request);
+        return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK).body(result);
     }
 }

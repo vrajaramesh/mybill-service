@@ -225,6 +225,7 @@ Creates a **DRAFT** order, priced by the server in the same way as the quote.
 - The delivery pincode must be serviceable; otherwise the response is 422 `PINCODE_NOT_SERVICEABLE`. The order stores its `estimated_delivery_date` at creation, so it doesn't change later.
 
 - `channel` is `WHATSAPP`, `INSTAGRAM`, `WEB` or `SHOP`; `qty` is 1 to 10.
+- Optional marketing attribution (see [Marketing attribution](#marketing-attribution-click-to-whatsapp-ads--instagram-posts)): `source_type` (`AD` or `IG_MEDIA`) and `source_id` (numeric) come as a pair, plus `ctwa_clid` (max 500 chars). They are stored on the order and returned by `GET /orders/{orderNo}`; omit them for organic conversations.
 - **Idempotency:** generate one `idempotency_key` per order attempt and reuse it on every retry. A repeat returns the **original** order with **200** instead of 201, and no duplicate is created, even for two requests at the same moment. Using the same key for a different customer returns 409 `IDEMPOTENCY_KEY_REUSED`.
 - The order line stores a copy of the design code and name, the chosen options with their prices, and the customer's latest measurements. Later changes to the catalog or to the measurements don't affect existing orders.
 
@@ -368,9 +369,53 @@ Webhooks are configured separately for Test and Live mode.
    Replace `plink_XXXX` with the link id stored in `boutique_order_payments`, and `amount_paid` with the order total in paise.
 4. **Check the result:** the order shows **Paid** in mybill-ui → Boutique Orders, and a new stitching order appears in Boutique. Run the reconciliation job by hand with `curl -X POST localhost:8080/internal/jobs/reconcile-payments` (the local profile skips its token check).
 
+## Marketing attribution (Click-to-WhatsApp ads / Instagram posts)
+
+Staff map each Click-to-WhatsApp ad (`AD`, Meta's ad id) or, later, Instagram post (`IG_MEDIA`, media id) to the design it promotes in mybill-ui → **Ad & post links**. When a conversation starts from an ad, the WhatsApp webhook's `referral` carries `source_type`/`source_id` and `ctwa_clid`. The agent then:
+
+1. resolves the link to jump straight to the design,
+2. reports a `conversation_started` event,
+3. passes `source_type`, `source_id` and `ctwa_clid` on `POST /api/agent/orders`.
+
+mybill-ui → **Ad performance** puts it together.
+
+### `GET /api/agent/marketing-links/resolve?type=AD&id=120210000000000001`
+
+**200** `{"design_code": "KUR-301", "label": "Mustard kurti reel – Diwali boost"}`. Only **active** links resolve; unknown and deactivated links both return 404 `MARKETING_LINK_NOT_FOUND`. A `type` other than `AD`/`IG_MEDIA` is 400.
+
+### `POST /api/agent/marketing-events`
+
+```json
+{ "event_type": "conversation_started", "source_type": "AD", "source_id": "120210000000000001",
+  "ctwa_clid": "ARAkLkA8rmlFeiCkt...", "customer_id": 512, "occurred_at": "2026-10-18T10:15:00+05:30" }
+```
+
+- `event_type` is optional (only `conversation_started` exists); `ctwa_clid`, `customer_id` (must exist → else 422 `CUSTOMER_NOT_FOUND`) and `occurred_at` (default now) are optional.
+- **Idempotent on `ctwa_clid`:** the first report returns **201** `{"event_id": 17, "created": true}`, a repeat returns **200** with the same `event_id` and `"created": false`. Events without a `ctwa_clid` are not deduplicated, so send them once.
+
+### Staff endpoints for mybill-ui (`/api/boutique-marketing`, app login)
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/links` | All links, active first. Includes `design_name`. |
+| POST | `/links` | `{source_type, source_id, design_code, label, active?}` → 201. `source_id` must be numeric (400), the design must exist (422 `DESIGN_NOT_FOUND`), one link per type + id (409 `MARKETING_LINK_EXISTS`). |
+| PUT | `/links/{id}` | Same body; `active` omitted = unchanged. |
+| POST | `/links/{id}/deactivate`, `/links/{id}/activate` | Soft delete; deactivated links stop resolving but stay in the report. |
+| GET | `/designs` | Design picker: `[{code, name, active}]`. |
+| GET | `/report?from=2026-10-01&to=2026-10-18` | IST dates, inclusive, default the last 30 days, at most 366 days. |
+
+The report has one row per link (inactive ones too) plus **Unmapped/other**, and a `total`:
+
+- **conversations:** `conversation_started` events by `occurred_at`.
+- **orders:** orders by `created_at`.
+- **paid_orders / paid_revenue:** orders with `paid_at` set (PAID and every later status), summing the order `total`.
+- **conversion_pct:** paid orders ÷ conversations × 100, 1 decimal; `null` without conversations.
+
+"Unmapped/other" collects ad/post ids that have no link **and** orders without a source (organic). Organic orders have no conversation events, so that row's conversion % is not comparable to the ad rows.
+
 ## Data model notes
 
-The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V5`. That happens on startup, and also on the first agent call for a firm registered later.
+The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V6`. That happens on startup, and also on the first agent call for a firm registered later.
 
 | Table | Notes |
 |---|---|
@@ -381,7 +426,9 @@ The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from 
 | `customers` | Gets new columns `phone_e164` and `instagram_user_id` (both unique where not empty), `source` (existing rows are `SHOP`) and `updated_at`. `phone_e164` was filled from the old phone column wherever the result was unambiguous. Numbers shared by several customers were left empty, and the startup log says how many. |
 | `customer_measurements` | Gets new columns `size_code`, `height_cm`, `fit_preference`, `source`. The API's `bust_in` is stored in the existing `chest` column. |
 | `boutique_order_payments` | V5: one row per Razorpay Payment Link (amount in paise, status, payment id, `needs_review`). Separate from the tailors' `boutique_payments`. |
-| `boutique_orders`, `boutique_order_items` | New. V5 adds `PAYMENT_PENDING` and `paid_at`. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
+| `marketing_links` | V6: `source_type` (`AD`/`IG_MEDIA`) + numeric `source_id` (unique together) → `design_code` (FK to `boutique_designs.code`), `label`, `active`. |
+| `marketing_events` | V6: `conversation_started` events from the agent (`source_type`, `source_id`, `ctwa_clid` unique, `customer_id`, `occurred_at`). |
+| `boutique_orders`, `boutique_order_items` | New. V6 adds nullable `source_type`, `source_id`, `ctwa_clid`. V5 adds `PAYMENT_PENDING` and `paid_at`. Order numbers come from `boutique_order_no_seq` and start at SB-1001. `estimated_delivery_date` is added by V4. `stitching_order_id` is for linking a paid order to the workshop's stitching order later. |
 
 Sample data for testing (`KUR-101..103` plus options) is in `src/main/resources/db/boutique/dev-seed.sql`. It is **not** run automatically:
 

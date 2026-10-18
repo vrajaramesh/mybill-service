@@ -23,5 +23,8 @@ public record OrderResponse(
     LocalDate estimatedDeliveryDate,
     LocalDateTime paidAt,
     PaymentInfo payment,
+    String sourceType,
+    String sourceId,
+    String ctwaClid,
     LocalDateTime createdAt
 ) {}

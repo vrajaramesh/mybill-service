@@ -60,6 +60,11 @@ public class BoutiqueOrder {
     @Column(name = "paid_at")
     private LocalDateTime paidAt;
 
+    /** Marketing attribution (V6): AD / IG_MEDIA + Meta's id, and the Click-to-WhatsApp click id. NULL = organic. */
+    @Column(name = "source_type", length = 20) private String sourceType;
+    @Column(name = "source_id", length = 40) private String sourceId;
+    @Column(name = "ctwa_clid", length = 500) private String ctwaClid;
+
     @Column(name = "stitching_order_id")
     private Integer stitchingOrderId;
 
@@ -114,6 +119,12 @@ public class BoutiqueOrder {
     public void setEstimatedDeliveryDate(java.time.LocalDate v) { this.estimatedDeliveryDate = v; }
     public LocalDateTime getPaidAt() { return paidAt; }
     public void setPaidAt(LocalDateTime v) { this.paidAt = v; }
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String v) { this.sourceType = v; }
+    public String getSourceId() { return sourceId; }
+    public void setSourceId(String v) { this.sourceId = v; }
+    public String getCtwaClid() { return ctwaClid; }
+    public void setCtwaClid(String v) { this.ctwaClid = v; }
     public Integer getStitchingOrderId() { return stitchingOrderId; }
     public void setStitchingOrderId(Integer stitchingOrderId) { this.stitchingOrderId = stitchingOrderId; }
     public LocalDateTime getCreatedAt() { return createdAt; }

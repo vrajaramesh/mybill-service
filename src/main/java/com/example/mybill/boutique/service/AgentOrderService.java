@@ -100,6 +100,11 @@ public class AgentOrderService {
         order.setChannel(request.channel().toUpperCase(Locale.ROOT));
         order.setIdempotencyKey(request.idempotencyKey());
         order.setEstimatedDeliveryDate(ship.estimatedDeliveryDate());
+        if (request.sourceType() != null && !request.sourceType().isBlank()) {
+            order.setSourceType(request.sourceType());
+            order.setSourceId(request.sourceId());
+        }
+        order.setCtwaClid(request.ctwaClid() == null || request.ctwaClid().isBlank() ? null : request.ctwaClid().trim());
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
 
@@ -240,6 +245,7 @@ public class AgentOrderService {
             o.getEstimatedDeliveryDate(), o.getPaidAt(),
             paymentLinkService.latestByOrder(List.of(o.getOrderId())).values().stream().findFirst()
                 .map(p -> paymentLinkService.toInfo(o, p)).orElse(null),
+            o.getSourceType(), o.getSourceId(), o.getCtwaClid(),
             o.getCreatedAt());
     }
 
