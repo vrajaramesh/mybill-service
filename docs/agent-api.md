@@ -467,14 +467,14 @@ The report has one row per link (inactive ones too) plus **Unmapped/other**, and
 
 ## Data model notes
 
-The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V7`. That happens on startup, and also on the first agent call for a firm registered later.
+The tables are created in each firm schema by `BoutiqueSchemaInitializer`, from `db/boutique/V1..V8`. That happens on startup, and also on the first agent call for a firm registered later.
 
 | Table | Notes |
 |---|---|
 | `boutique_designs` | The existing designs table, shared with the admin UI and the ecom shop. New columns: `code` (unique), `name`, `fabric_description`, `fabric_product_id`. `rough_price` is the base price and `delivery_days` the lead time. Existing designs got codes like `LEH-1`, and designs created in the UI get one automatically. |
 | `boutique_design_images` | Gets a new `sort_order` column. |
 | `customisation_options` | New. `design_id` NULL means the option applies to all designs. At most one option per `option_group` on an order line. |
-| `size_chart` | New. Filled with a standard XS–XXL chart, but only if the table is empty. |
+| `size_chart` | New. Filled with a standard XS–XXL chart, but only if the table is empty. V8 adds 3XL (44/38/47) and 4XL (46/40/49). |
 | `customers` | Gets new columns `phone_e164` and `instagram_user_id` (both unique where not empty), `source` (existing rows are `SHOP`) and `updated_at`. `phone_e164` was filled from the old phone column wherever the result was unambiguous. Numbers shared by several customers were left empty, and the startup log says how many. |
 | `customer_measurements` | Gets new columns `size_code`, `height_cm`, `fit_preference`, `source`. The API's `bust_in` is stored in the existing `chest` column. |
 | `boutique_order_payments` | V5: one row per Razorpay Payment Link (amount in paise, status, payment id, `needs_review`). Separate from the tailors' `boutique_payments`. |
