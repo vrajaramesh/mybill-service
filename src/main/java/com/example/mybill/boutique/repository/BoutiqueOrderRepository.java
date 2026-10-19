@@ -19,6 +19,8 @@ public interface BoutiqueOrderRepository extends JpaRepository<BoutiqueOrder, In
 
     List<BoutiqueOrder> findByStatusOrderByCreatedAtDescOrderIdDesc(BoutiqueOrderStatus status, Pageable page);
 
+    List<BoutiqueOrder> findByCustomerIdOrderByCreatedAtDescOrderIdDesc(Integer customerId, Pageable page);
+
     /** Next number from the per-firm sequence (resolved through the tenant's search_path). */
     @Query(value = "SELECT nextval('boutique_order_no_seq')", nativeQuery = true)
     long nextOrderNumber();

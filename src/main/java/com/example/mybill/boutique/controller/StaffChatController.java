@@ -1,0 +1,107 @@
+package com.example.mybill.boutique.controller;
+
+import com.example.mybill.boutique.exception.AgentApiException;
+import com.example.mybill.boutique.service.AgentOrderService;
+import com.example.mybill.boutique.service.AgentStaffClient;
+import com.example.mybill.multitenancy.JwtUtil;
+import com.example.mybill.multitenancy.TenantContext;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+
+/**
+ * mybill-ui "Customer chats": the WhatsApp/Instagram conversations the AI handed to the team. Normal app login; the
+ * conversations live in srisa-agent, which serves one firm (agent.tenant-schema), so other firms see an empty inbox.
+ */
+@RestController
+@RequestMapping("/api/boutique-chats")
+public class StaffChatController {
+
+    @Autowired private AgentStaffClient agent;
+    @Autowired private AgentOrderService orderService;
+    @Autowired private JwtUtil jwtUtil;
+    @Autowired private ObjectMapper objectMapper;
+
+    @Value("${agent.tenant-schema:firm_srisa}") private String agentTenant;
+
+    @GetMapping
+    public JsonNode list(@RequestParam(defaultValue = "waiting") String status) {
+        if (!agentFirm()) return objectMapper.createArrayNode();
+        if (!status.equals("waiting") && !status.equals("all")) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "status must be waiting or all", null);
+        }
+        return agent.get("/staff/conversations?status=" + status + "&limit=100");
+    }
+
+    @GetMapping("/count")
+    public JsonNode count() {
+        if (!agentFirm()) return objectMapper.createObjectNode().put("waiting", 0);
+        return agent.get("/staff/conversations/count");
+    }
+
+    /** The conversation, its messages, and the customer's orders from mybill. */
+    @GetMapping("/{id}")
+    public JsonNode get(@PathVariable String id) {
+        requireAgentFirm();
+        ObjectNode conversation = (ObjectNode) agent.get("/staff/conversations/" + uuid(id));
+        JsonNode customerId = conversation.get("mybill_customer_id");
+        conversation.set("orders", customerId == null || customerId.isNull() ? objectMapper.createArrayNode()
+            : objectMapper.valueToTree(orderService.listForCustomer(customerId.asInt(), 10)));
+        return conversation;
+    }
+
+    @PostMapping("/{id}/reply")
+    public JsonNode reply(@PathVariable String id, @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        requireAgentFirm();
+        Object text = body.get("text");
+        if (!(text instanceof String s) || s.isBlank()) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "text is required", null);
+        }
+        return agent.post("/staff/conversations/" + uuid(id) + "/reply", Map.of("text", s, "staff_name", staffName(request)));
+    }
+
+    @PostMapping("/{id}/resolve")
+    public JsonNode resolve(@PathVariable String id) {
+        requireAgentFirm();
+        return agent.post("/staff/conversations/" + uuid(id) + "/resolve", Map.of());
+    }
+
+    @PostMapping("/{id}/keep")
+    public JsonNode keep(@PathVariable String id) {
+        requireAgentFirm();
+        return agent.post("/staff/conversations/" + uuid(id) + "/keep", Map.of());
+    }
+
+    private boolean agentFirm() {
+        return agentTenant.equals(TenantContext.getCurrentTenant());
+    }
+
+    private void requireAgentFirm() {
+        if (!agentFirm()) throw AgentApiException.notFound("CHAT_NOT_FOUND", "No customer chats for this firm");
+    }
+
+    private static String uuid(String id) {
+        try {
+            return java.util.UUID.fromString(id).toString();
+        } catch (IllegalArgumentException e) {
+            throw AgentApiException.notFound("CHAT_NOT_FOUND", "No chat " + id);
+        }
+    }
+
+    private String staffName(HttpServletRequest request) {
+        try {
+            String header = request.getHeader("Authorization");
+            return jwtUtil.extractClaims(header.substring("Bearer ".length())).getSubject();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+}

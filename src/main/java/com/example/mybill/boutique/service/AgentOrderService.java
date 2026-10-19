@@ -148,6 +148,17 @@ public class AgentOrderService {
             }
             orders = orderRepository.findByStatusOrderByCreatedAtDescOrderIdDesc(s, page);
         }
+        return summaries(orders);
+    }
+
+    /** A customer's orders, newest first (staff inbox side panel). */
+    @Transactional(readOnly = true)
+    public List<OrderSummary> listForCustomer(Integer customerId, int limit) {
+        return summaries(orderRepository.findByCustomerIdOrderByCreatedAtDescOrderIdDesc(customerId,
+            PageRequest.of(0, Math.max(1, Math.min(limit, MAX_LIST)))));
+    }
+
+    private List<OrderSummary> summaries(List<BoutiqueOrder> orders) {
         Map<Integer, BoutiqueOrderPayment> payments = paymentLinkService.latestByOrder(
             orders.stream().map(BoutiqueOrder::getOrderId).toList());
         Map<Integer, BoutiqueCustomer> customers = customerRepository
