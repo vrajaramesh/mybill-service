@@ -25,7 +25,7 @@ public class BoutiqueMeasurement {
     @Column(name = "profile_name", nullable = false, length = 100)
     private String profileName = "Online";
 
-    @Column(name = "size_code", length = 5)
+    @Column(name = "size_code", length = 10)
     private String sizeCode;
 
     @Column(name = "height_cm", precision = 5, scale = 1)

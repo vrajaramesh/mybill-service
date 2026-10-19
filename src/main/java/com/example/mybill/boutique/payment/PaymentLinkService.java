@@ -2,6 +2,7 @@ package com.example.mybill.boutique.payment;
 
 import com.example.mybill.boutique.dto.PaymentInfo;
 import com.example.mybill.boutique.entity.*;
+import com.example.mybill.boutique.service.AgentCatalogService;
 import com.example.mybill.boutique.service.AgentOrderService;
 import com.example.mybill.boutique.exception.AgentApiException;
 import com.example.mybill.boutique.repository.*;
@@ -294,11 +295,14 @@ public class PaymentLinkService {
         return new AgentEvent(event, order.getOrderNo(), phone, c != null ? c.getCustomerName() : order.getDeliveryName(),
             order.getTotal(), order.getEstimatedDeliveryDate(), eventId, shortUrl,
             AgentOrderService.MEASUREMENT_PENDING.equals(order.getMeasurementStatus()),
-            item == null ? null : item.getDesignCode(), item == null ? null : item.getDesignName());
+            item == null ? null : item.getDesignCode(),
+            item == null ? null : item.getDesignName()
+                + (AgentCatalogService.CUSTOM_SIZE.equals(item.getSizeCode()) ? ", custom size" : ""));
     }
 
-    /** Any item's design is flagged "exact measurements needed" in the catalog. */
+    /** A custom size, or any item's design flagged "exact measurements needed" in the catalog. */
     private boolean needsExactMeasurements(BoutiqueOrder order) {
+        if (order.getItems().stream().anyMatch(i -> AgentCatalogService.CUSTOM_SIZE.equals(i.getSizeCode()))) return true;
         return order.getItems().stream()
             .filter(i -> i.getDesignId() != null)
             .map(i -> designRepository.findById(i.getDesignId()).orElse(null))

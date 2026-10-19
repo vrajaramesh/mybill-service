@@ -32,7 +32,7 @@ public class BoutiqueOrderItem {
     @Column(name = "design_name", nullable = false, length = 150)
     private String designName;
 
-    @Column(name = "size_code", nullable = false, length = 5)
+    @Column(name = "size_code", nullable = false, length = 10)
     private String sizeCode;
 
     /** JSON array of {option_id, option_group, name, price_delta}. */

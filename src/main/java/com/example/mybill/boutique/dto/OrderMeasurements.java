@@ -9,7 +9,7 @@ import java.math.BigDecimal;
 /** Measurements given with an order; stored as the order item's snapshot. Same ranges as MeasurementRequest. */
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record OrderMeasurements(
-    @Size(max = 5, message = "measurements.size_code is too long")
+    @Size(max = 10, message = "measurements.size_code is too long")
     String sizeCode,
 
     @DecimalMin(value = "120.0", message = "measurements.height_cm must be between 120 and 200")

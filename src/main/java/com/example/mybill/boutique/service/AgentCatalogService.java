@@ -79,10 +79,14 @@ public class AgentCatalogService {
             .toList();
     }
 
-    /** Upper-cased size code if it is in the chart, else 422 INVALID_SIZE. */
+    /** Custom size: not in the chart; our tailor calls the customer after payment to take exact measurements. */
+    public static final String CUSTOM_SIZE = "CUSTOM";
+
+    /** Upper-cased size code if it is in the chart (or CUSTOM), else 422 INVALID_SIZE. */
     @Transactional(readOnly = true)
     public String requireSize(String sizeCode) {
         String normalised = sizeCode.trim().toUpperCase(Locale.ROOT);
+        if (CUSTOM_SIZE.equals(normalised)) return CUSTOM_SIZE;
         if (!sizeChartRepository.existsBySizeCode(normalised)) {
             List<String> valid = sizeChart().stream().map(SizeChartRow::sizeCode).toList();
             throw AgentApiException.unprocessable("INVALID_SIZE", "Unknown size " + sizeCode,
