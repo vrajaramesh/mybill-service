@@ -2,6 +2,7 @@ package com.example.mybill.boutique.payment;
 
 import com.example.mybill.boutique.dto.PaymentInfo;
 import com.example.mybill.boutique.entity.*;
+import com.example.mybill.boutique.service.AgentOrderService;
 import com.example.mybill.boutique.exception.AgentApiException;
 import com.example.mybill.boutique.repository.*;
 import com.example.mybill.multitenancy.TenantContext;
@@ -189,6 +190,10 @@ public class PaymentLinkService {
         if (order.getStitchingOrderId() == null && !order.getItems().isEmpty()) {
             order.setStitchingOrderId(createStitchingOrder(order, payment).getOrderId());
         }
+        if (order.getMeasurementStatus() == null && needsExactMeasurements(order)) {
+            order.setMeasurementStatus(AgentOrderService.MEASUREMENT_PENDING);   // the tailor calls her
+            log.info("MEASUREMENT_CALL_NEEDED order={}", order.getOrderNo());
+        }
         log.info("ORDER_PAID order={} payment={} link={}", order.getOrderNo(), razorpayPaymentId, linkId);
         events.publishEvent(agentEvent(AgentEvent.ORDER_PAID, order, eventId, null));
         return Outcome.PAID;
@@ -285,8 +290,19 @@ public class PaymentLinkService {
     private AgentEvent agentEvent(String event, BoutiqueOrder order, String eventId, String shortUrl) {
         BoutiqueCustomer c = customerRepository.findById(order.getCustomerId()).orElse(null);
         String phone = c != null && c.getPhoneE164() != null ? c.getPhoneE164() : order.getDeliveryPhone();
+        BoutiqueOrderItem item = order.getItems().isEmpty() ? null : order.getItems().get(0);
         return new AgentEvent(event, order.getOrderNo(), phone, c != null ? c.getCustomerName() : order.getDeliveryName(),
-            order.getTotal(), order.getEstimatedDeliveryDate(), eventId, shortUrl);
+            order.getTotal(), order.getEstimatedDeliveryDate(), eventId, shortUrl,
+            AgentOrderService.MEASUREMENT_PENDING.equals(order.getMeasurementStatus()),
+            item == null ? null : item.getDesignCode(), item == null ? null : item.getDesignName());
+    }
+
+    /** Any item's design is flagged "exact measurements needed" in the catalog. */
+    private boolean needsExactMeasurements(BoutiqueOrder order) {
+        return order.getItems().stream()
+            .filter(i -> i.getDesignId() != null)
+            .map(i -> designRepository.findById(i.getDesignId()).orElse(null))
+            .anyMatch(d -> d != null && d.needsExactMeasurements());
     }
 
     private Map<String, Object> readMap(String json) {

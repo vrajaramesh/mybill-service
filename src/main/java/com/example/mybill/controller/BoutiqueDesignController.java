@@ -27,8 +27,8 @@ public class BoutiqueDesignController {
         if (s == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT design_id, garment_type, description, rough_price, delivery_days, " +
-            "       image_url, public_id, is_active, created_at " +
+            "SELECT design_id, code, garment_type, description, rough_price, delivery_days, " +
+            "       image_url, public_id, is_active, exact_measurements, created_at " +
             "FROM \"" + s + "\".boutique_designs ORDER BY garment_type, design_id");
 
         if (rows.isEmpty()) return ResponseEntity.ok(List.of());
@@ -44,6 +44,8 @@ public class BoutiqueDesignController {
             item.put("roughPrice",   row.get("rough_price"));
             item.put("deliveryDays", row.get("delivery_days"));
             item.put("isActive",     row.get("is_active"));
+            item.put("code",         row.get("code"));
+            item.put("exactMeasurements", Boolean.TRUE.equals(row.get("exact_measurements")));
             item.put("createdAt",    row.get("created_at"));
             item.put("images",       new ArrayList<Map<String, Object>>());
             designMap.put(id, item);
@@ -105,10 +107,12 @@ public class BoutiqueDesignController {
         Double roughPrice  = body.get("roughPrice")   != null ? ((Number) body.get("roughPrice")).doubleValue()   : null;
         Integer deliveryDays = body.get("deliveryDays") != null ? ((Number) body.get("deliveryDays")).intValue()  : null;
 
+        boutiqueSchemaInitializer.ensureSchema(s);   // exact_measurements column (V9)
+        boolean exact = Boolean.TRUE.equals(body.get("exactMeasurements"));
         List<Integer> generatedIds = jdbcTemplate.queryForList(
-            "INSERT INTO \"" + s + "\".boutique_designs (garment_type, description, rough_price, delivery_days) " +
-            "VALUES (?, ?, ?, ?) RETURNING design_id",
-            Integer.class, garmentType, description, roughPrice, deliveryDays);
+            "INSERT INTO \"" + s + "\".boutique_designs (garment_type, description, rough_price, delivery_days, exact_measurements) " +
+            "VALUES (?, ?, ?, ?, ?) RETURNING design_id",
+            Integer.class, garmentType, description, roughPrice, deliveryDays, exact);
 
         if (generatedIds.isEmpty()) return ResponseEntity.internalServerError().build();
         int designId = generatedIds.get(0);
@@ -138,11 +142,13 @@ public class BoutiqueDesignController {
         Double roughPrice    = body.get("roughPrice")    != null ? ((Number) body.get("roughPrice")).doubleValue()    : null;
         Integer deliveryDays = body.get("deliveryDays")  != null ? ((Number) body.get("deliveryDays")).intValue()     : null;
         Boolean isActive     = body.get("isActive") instanceof Boolean b ? b : true;
+        boolean exact        = Boolean.TRUE.equals(body.get("exactMeasurements"));
 
+        boutiqueSchemaInitializer.ensureSchema(s);   // exact_measurements column (V9)
         jdbcTemplate.update(
             "UPDATE \"" + s + "\".boutique_designs SET garment_type = ?, description = ?, rough_price = ?, " +
-            "delivery_days = ?, is_active = ?, updated_at = NOW() WHERE design_id = ?",
-            garmentType, description, roughPrice, deliveryDays, isActive, id);
+            "delivery_days = ?, is_active = ?, exact_measurements = ?, updated_at = NOW() WHERE design_id = ?",
+            garmentType, description, roughPrice, deliveryDays, isActive, exact, id);
 
         return ResponseEntity.ok(Map.of("updated", true));
     }

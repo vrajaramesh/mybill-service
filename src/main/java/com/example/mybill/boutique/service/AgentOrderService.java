@@ -40,6 +40,8 @@ public class AgentOrderService {
     private com.example.mybill.boutique.payment.PaymentLinkService paymentLinkService;
 
     static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    public static final String MEASUREMENT_PENDING = "PENDING_CALL";
+    public static final String MEASUREMENT_TAKEN = "TAKEN";
     static final int MAX_LIST = 100;
 
     public record CreateResult(OrderResponse order, boolean created) {}
@@ -151,6 +153,35 @@ public class AgentOrderService {
         return summaries(orders);
     }
 
+    /** Paid orders waiting for the tailor's measurement call, oldest payment first. */
+    @Transactional(readOnly = true)
+    public List<OrderSummary> pendingMeasurementCalls(int limit) {
+        return summaries(orderRepository.findByMeasurementStatusOrderByPaidAtAscOrderIdAsc(
+            MEASUREMENT_PENDING, PageRequest.of(0, Math.max(1, Math.min(limit, MAX_LIST)))));
+    }
+
+    @Transactional(readOnly = true)
+    public long countPendingMeasurementCalls() {
+        return orderRepository.countByMeasurementStatus(MEASUREMENT_PENDING);
+    }
+
+    /** The tailor has taken her exact measurements (idempotent; only for orders that were waiting). */
+    @Transactional
+    public OrderResponse markMeasurementsTaken(String orderNo, String staff) {
+        BoutiqueOrder order = orderRepository.findByOrderNo(orderNo.trim().toUpperCase(Locale.ROOT))
+            .orElseThrow(() -> AgentApiException.notFound("ORDER_NOT_FOUND", "No order " + orderNo));
+        if (order.getMeasurementStatus() == null) {
+            throw AgentApiException.conflict("MEASUREMENTS_NOT_NEEDED", "This order doesn't need a measurement call");
+        }
+        if (MEASUREMENT_PENDING.equals(order.getMeasurementStatus())) {
+            order.setMeasurementStatus(MEASUREMENT_TAKEN);
+            order.setMeasurementTakenAt(LocalDateTime.now());
+            order.setMeasurementTakenBy(staff);
+            order.setUpdatedAt(LocalDateTime.now());
+        }
+        return toResponse(order);
+    }
+
     /** A customer's orders, newest first (staff inbox side panel). */
     @Transactional(readOnly = true)
     public List<OrderSummary> listForCustomer(Integer customerId, int limit) {
@@ -175,7 +206,7 @@ public class AgentOrderService {
                 first == null ? null : first.getSizeCode(), first == null ? 0 : first.getQuantity(),
                 o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(),
                 pay == null ? null : pay.getStatus(), o.getPaidAt(), pay == null ? null : pay.getRazorpayPaymentId(),
-                o.getCreatedAt());
+                o.getMeasurementStatus(), o.getCreatedAt());
         }).toList();
     }
 
@@ -257,6 +288,7 @@ public class AgentOrderService {
             paymentLinkService.latestByOrder(List.of(o.getOrderId())).values().stream().findFirst()
                 .map(p -> paymentLinkService.toInfo(o, p)).orElse(null),
             o.getSourceType(), o.getSourceId(), o.getCtwaClid(),
+            o.getMeasurementStatus(), o.getMeasurementTakenAt(), o.getMeasurementTakenBy(),
             o.getCreatedAt());
     }
 

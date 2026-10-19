@@ -61,6 +61,9 @@ public class AgentEventNotifier {
         body.put("amount", event.amount());
         body.put("estimated_delivery_date", event.estimatedDeliveryDate() == null ? null : event.estimatedDeliveryDate().toString());
         body.put("event_id", event.eventId());
+        body.put("exact_measurements_required", event.exactMeasurementsRequired());
+        body.put("design_code", event.designCode());
+        body.put("design_name", event.designName());
         String url = eventsUrl.replaceAll("/+$", "") + "/internal/events";
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {

@@ -10,7 +10,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.util.List;
+import java.util.Map;
 
 /**
  * Read-only boutique order screens in mybill-ui ("Boutique Orders"). Uses the normal app login (TenantFilter JWT),
@@ -22,13 +25,37 @@ public class BoutiqueOrderAdminController {
 
     @Autowired private AgentOrderService orderService;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
+    @Autowired private com.example.mybill.multitenancy.JwtUtil jwtUtil;
 
-    /** e.g. ?status=DRAFT&limit=50 (limit 1..100, newest first). */
+    /** e.g. ?status=DRAFT&limit=50 (limit 1..100, newest first), or ?measurement=pending (oldest payment first). */
     @GetMapping
     public List<OrderSummary> list(@RequestParam(required = false) String status,
+                                   @RequestParam(required = false) String measurement,
                                    @RequestParam(defaultValue = "50") int limit) {
         requireFirm();
+        if ("pending".equalsIgnoreCase(measurement)) return orderService.pendingMeasurementCalls(limit);
         return orderService.list(status, limit);
+    }
+
+    /** Sidebar badge: paid orders waiting for the tailor's measurement call. */
+    @GetMapping("/count")
+    public Map<String, Long> count(@RequestParam(defaultValue = "pending") String measurement) {
+        requireFirm();
+        return Map.of("measurement_pending", orderService.countPendingMeasurementCalls());
+    }
+
+    @PostMapping("/{orderNo}/measurements-taken")
+    public OrderResponse measurementsTaken(@PathVariable String orderNo, HttpServletRequest request) {
+        requireFirm();
+        return orderService.markMeasurementsTaken(orderNo, staffName(request));
+    }
+
+    private String staffName(HttpServletRequest request) {
+        try {
+            return jwtUtil.extractClaims(request.getHeader("Authorization").substring("Bearer ".length())).getSubject();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @GetMapping("/{orderNo}")

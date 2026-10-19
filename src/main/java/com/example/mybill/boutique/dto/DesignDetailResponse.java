@@ -17,5 +17,7 @@ public record DesignDetailResponse(
     Integer leadTimeDays,
     String currency,
     List<ImageDto> images,
-    List<OptionGroupDto> optionGroups
+    List<OptionGroupDto> optionGroups,
+    /** Our tailor calls the customer after payment to take exact measurements (blouse/choli, ...). */
+    boolean exactMeasurements
 ) {}

@@ -45,6 +45,10 @@ public class BoutiqueDesign {
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
 
+    /** Our tailor must take the customer's exact measurements (phone call after payment). */
+    @Column(name = "exact_measurements", nullable = false)
+    private Boolean exactMeasurements = false;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -74,6 +78,9 @@ public class BoutiqueDesign {
     public void setLeadTimeDays(Integer leadTimeDays) { this.leadTimeDays = leadTimeDays; }
     public Integer getFabricProductId() { return fabricProductId; }
     public void setFabricProductId(Integer fabricProductId) { this.fabricProductId = fabricProductId; }
+    public boolean needsExactMeasurements() { return Boolean.TRUE.equals(exactMeasurements); }
+    public Boolean getExactMeasurements() { return exactMeasurements; }
+    public void setExactMeasurements(Boolean v) { this.exactMeasurements = v; }
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public LocalDateTime getCreatedAt() { return createdAt; }

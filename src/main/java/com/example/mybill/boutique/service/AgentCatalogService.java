@@ -50,7 +50,7 @@ public class AgentCatalogService {
 
         return new DesignDetailResponse(design.getCode(), design.displayName(), design.getGarmentType(),
             design.getDescription(), design.getFabricDescription(), PricingService.money(design.getBasePrice()),
-            design.getLeadTimeDays(), PricingService.CURRENCY, images, groups);
+            design.getLeadTimeDays(), PricingService.CURRENCY, images, groups, design.needsExactMeasurements());
     }
 
     /** Newest active designs with their first image. limit is clamped to 1..20. */

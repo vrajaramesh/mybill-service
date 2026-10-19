@@ -26,5 +26,8 @@ public record OrderResponse(
     String sourceType,
     String sourceId,
     String ctwaClid,
+    String measurementStatus,
+    LocalDateTime measurementTakenAt,
+    String measurementTakenBy,
     LocalDateTime createdAt
 ) {}

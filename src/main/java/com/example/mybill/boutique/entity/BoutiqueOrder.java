@@ -65,6 +65,11 @@ public class BoutiqueOrder {
     @Column(name = "source_id", length = 40) private String sourceId;
     @Column(name = "ctwa_clid", length = 500) private String ctwaClid;
 
+    /** PENDING_CALL (paid, the tailor must call for exact measurements) -> TAKEN; NULL = not needed. */
+    @Column(name = "measurement_status", length = 20) private String measurementStatus;
+    @Column(name = "measurement_taken_at") private LocalDateTime measurementTakenAt;
+    @Column(name = "measurement_taken_by", length = 100) private String measurementTakenBy;
+
     @Column(name = "stitching_order_id")
     private Integer stitchingOrderId;
 
@@ -125,6 +130,12 @@ public class BoutiqueOrder {
     public void setSourceId(String v) { this.sourceId = v; }
     public String getCtwaClid() { return ctwaClid; }
     public void setCtwaClid(String v) { this.ctwaClid = v; }
+    public String getMeasurementStatus() { return measurementStatus; }
+    public void setMeasurementStatus(String v) { this.measurementStatus = v; }
+    public LocalDateTime getMeasurementTakenAt() { return measurementTakenAt; }
+    public void setMeasurementTakenAt(LocalDateTime v) { this.measurementTakenAt = v; }
+    public String getMeasurementTakenBy() { return measurementTakenBy; }
+    public void setMeasurementTakenBy(String v) { this.measurementTakenBy = v; }
     public Integer getStitchingOrderId() { return stitchingOrderId; }
     public void setStitchingOrderId(Integer stitchingOrderId) { this.stitchingOrderId = stitchingOrderId; }
     public LocalDateTime getCreatedAt() { return createdAt; }
