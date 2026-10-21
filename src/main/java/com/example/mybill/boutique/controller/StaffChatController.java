@@ -61,11 +61,20 @@ public class StaffChatController {
     @PostMapping("/{id}/reply")
     public JsonNode reply(@PathVariable String id, @RequestBody Map<String, Object> body, HttpServletRequest request) {
         requireAgentFirm();
-        Object text = body.get("text");
-        if (!(text instanceof String s) || s.isBlank()) {
-            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "text is required", null);
+        String text = body.get("text") instanceof String s ? s : "";
+        String imageUrl = body.get("image_url") instanceof String s && !s.isBlank() ? s : null;
+        if (text.isBlank() && imageUrl == null) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "text or image_url is required", null);
         }
-        return agent.post("/staff/conversations/" + uuid(id) + "/reply", Map.of("text", s, "staff_name", staffName(request)));
+        if (imageUrl != null && !imageUrl.startsWith("https://")) {
+            throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "image_url must be https", null);
+        }
+        Map<String, Object> payload = new java.util.HashMap<>();
+        payload.put("text", text);
+        if (imageUrl != null) payload.put("image_url", imageUrl);
+        String staff = staffName(request);
+        if (staff != null) payload.put("staff_name", staff);
+        return agent.post("/staff/conversations/" + uuid(id) + "/reply", payload);
     }
 
     @PostMapping("/{id}/resolve")
