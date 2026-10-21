@@ -65,6 +65,18 @@ public class AgentEventNotifier {
         body.put("design_code", event.designCode());
         body.put("design_name", event.designName());
         body.put("order_type", event.orderType());
+        return post(body, event.event() + " " + event.orderNo());
+    }
+
+    /**
+     * POST one event body to srisa-agent's /internal/events (3 attempts with backoff). label is for logs only;
+     * the body is never logged (it can hold a one-time code). Returns true if the agent accepted it.
+     */
+    public boolean post(Map<String, Object> body, String label) {
+        if (eventsUrl == null || eventsUrl.isBlank()) {
+            log.info("AGENT_EVENTS_URL not set; not notifying the agent about {}", label);
+            return false;
+        }
         String url = eventsUrl.replaceAll("/+$", "") + "/internal/events";
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
@@ -75,17 +87,16 @@ public class AgentEventNotifier {
                 if (authEnabled) request.header("Authorization", "Bearer " + idToken());
                 HttpResponse<String> resp = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() / 100 == 2) {
-                    log.info("Agent notified: {} {} (attempt {})", event.event(), event.orderNo(), attempt);
+                    log.info("Agent notified: {} (attempt {})", label, attempt);
                     return true;
                 }
-                log.warn("Agent event {} {} rejected: HTTP {} (attempt {})", event.event(), event.orderNo(), resp.statusCode(), attempt);
+                log.warn("Agent event {} rejected: HTTP {} (attempt {})", label, resp.statusCode(), attempt);
             } catch (Exception e) {
-                log.warn("Agent event {} {} failed (attempt {}): {}", event.event(), event.orderNo(), attempt, e.toString());
+                log.warn("Agent event {} failed (attempt {}): {}", label, attempt, e.toString());
             }
             if (attempt < 3) sleep(backoffMs * (1L << (attempt - 1)));
         }
-        log.error("AGENT_NOTIFY_FAILED event={} order={} event_id={} - customer not told automatically",
-            event.event(), event.orderNo(), event.eventId());
+        log.error("AGENT_NOTIFY_FAILED {}", label);
         return false;
     }
 

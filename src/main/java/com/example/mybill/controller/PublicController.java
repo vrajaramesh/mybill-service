@@ -285,6 +285,12 @@ public class PublicController {
                 || password == null || password.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "name, email and password are required"));
         }
+        // Mobile number: needed for order updates and the WhatsApp code to reset a forgotten password.
+        String whatsapp = phone == null ? null : EcomPasswordResetController.whatsappNumber(phone);
+        if (whatsapp == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Please enter a valid 10-digit mobile number"));
+        }
+        phone = "+" + whatsapp;
 
         // Check email uniqueness
         List<Map<String, Object>> existing = jdbcTemplate.queryForList(

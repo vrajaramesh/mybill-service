@@ -40,6 +40,7 @@ public class RazorpayWebhookController {
     @Autowired private FirmRepository firmRepository;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
     @Autowired private TenantWork tenantWork;
+    @Autowired private com.example.mybill.service.EcomPaymentService ecomPaymentService;
 
     @PostMapping("/webhooks/razorpay")
     public ResponseEntity<Map<String, Object>> receive(@RequestBody(required = false) byte[] body,
@@ -65,7 +66,9 @@ public class RazorpayWebhookController {
         JsonNode link = payload.path("payload").path("payment_link").path("entity");
         String eventId = eventIdHeader != null && !eventIdHeader.isBlank() ? eventIdHeader
             : "sha256:" + HexFormat.of().formatHex(sha256(raw));
-        String tenant = resolveTenant(link.path("notes").path("tenant").asText(null));
+        JsonNode rzpOrder = payload.path("payload").path("order").path("entity");
+        String tenant = resolveTenant(eventType.equals("order.paid")
+            ? rzpOrder.path("notes").path("tenant").asText(null) : link.path("notes").path("tenant").asText(null));
 
         // Dedupe: first delivery inserts the row; a redelivery of an already processed event is skipped.
         jdbc.update("INSERT INTO public.razorpay_webhook_events (event_id, event_type, tenant, payload) "
@@ -91,6 +94,7 @@ public class RazorpayWebhookController {
 
     private String process(String eventType, JsonNode link, JsonNode payload, String eventId, String tenant) {
         if (tenant == null) return "ignored_unknown_tenant";
+        if (eventType.equals("order.paid")) return ecomOrderPaid(payload, tenant);
         String linkId = link.path("id").asText(null);
         if (linkId == null || !eventType.startsWith("payment_link.")) return "ignored";
         schemaInitializer.ensureSchema(tenant);
@@ -107,6 +111,26 @@ public class RazorpayWebhookController {
                 case "payment_link.cancelled" -> paymentLinkService.handleClosed(linkId, "cancelled", eventId).name().toLowerCase();
                 default -> "ignored";
             });
+    }
+
+    /**
+     * Website checkout order paid (Razorpay Orders API). Backs up the browser's verify call, e.g. when she closed
+     * the page right after paying. Only orders we created for the website (notes.source = ecom) are touched.
+     */
+    private String ecomOrderPaid(JsonNode payload, String tenant) {
+        JsonNode order = payload.path("payload").path("order").path("entity");
+        JsonNode payment = payload.path("payload").path("payment").path("entity");
+        String orderId = order.path("id").asText(null);
+        if (orderId == null || !"ecom".equals(order.path("notes").path("source").asText(""))) return "ignored_not_ecom";
+        Long expected = ecomPaymentService.amountPaise(tenant, orderId);
+        if (expected == null) return "ignored_unknown_order";
+        long paid = order.path("amount_paid").asLong(payment.path("amount").asLong(-1));
+        if (paid != expected || !"INR".equalsIgnoreCase(order.path("currency").asText(""))) {
+            log.error("ECOM_PAYMENT_AMOUNT_MISMATCH order={} expected={} paid={} - not marked paid", orderId, expected, paid);
+            return "needs_review";
+        }
+        Integer internal = ecomPaymentService.markPaid(tenant, orderId, payment.path("id").asText(null), null);
+        return internal == null ? "already_paid" : "ecom_paid";
     }
 
     /** Firm schema from the link's notes (set when we created it); must be a registered firm. */

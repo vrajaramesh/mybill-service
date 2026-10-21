@@ -33,6 +33,7 @@ public class RazorpayController {
     @Autowired private FirmRepository firmRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private JwtUtil jwtUtil;
+    @Autowired private com.example.mybill.service.EcomPaymentService ecomPaymentService;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -144,6 +145,8 @@ public class RazorpayController {
             orderRequest.put("currency", "INR");
             orderRequest.put("receipt", "rcpt_" + customerId + "_" + System.currentTimeMillis());
             orderRequest.put("payment_capture", 1);
+            // Lets the order.paid webhook find the firm (see RazorpayWebhookController).
+            orderRequest.put("notes", new JSONObject().put("tenant", s).put("source", "ecom"));
 
             Order razorpayOrder = razorpay.orders.create(orderRequest);
             String razorpayOrderId = razorpayOrder.get("id");
@@ -247,23 +250,16 @@ public class RazorpayController {
             return ResponseEntity.status(500).body(Map.of("error", "Signature verification error"));
         }
 
-        // Mark order as PAID
-        int updated = jdbcTemplate.update(
-            "UPDATE \"" + s + "\".ecom_orders SET status = 'PAID', razorpay_payment_id = ?, paid_at = NOW() " +
-            "WHERE razorpay_order_id = ? AND customer_id = ? AND status = 'PENDING'",
-            razorpayPaymentId, razorpayOrderId, customerId);
-
-        if (updated == 0)
-            return ResponseEntity.badRequest().body(Map.of("error", "Order not found or already processed"));
-
-        // Get internal order_id
-        Integer orderId = jdbcTemplate.queryForObject(
-            "SELECT order_id FROM \"" + s + "\".ecom_orders WHERE razorpay_order_id = ?",
-            Integer.class, razorpayOrderId);
-
-        // Clear the customer's cart
-        jdbcTemplate.update(
-            "DELETE FROM \"" + s + "\".cart_items WHERE customer_id = ?", customerId);
+        // Mark order as PAID (clears the cart and alerts the staff); the webhook may have done it already.
+        Integer orderId = ecomPaymentService.markPaid(s, razorpayOrderId, razorpayPaymentId, customerId);
+        if (orderId == null) {
+            List<Integer> paid = jdbcTemplate.queryForList(
+                "SELECT order_id FROM \"" + s + "\".ecom_orders WHERE razorpay_order_id = ? AND customer_id = ? AND status <> 'PENDING'",
+                Integer.class, razorpayOrderId, customerId);
+            if (paid.isEmpty())
+                return ResponseEntity.badRequest().body(Map.of("error", "Order not found or already processed"));
+            orderId = paid.get(0);
+        }
 
         return ResponseEntity.ok(Map.of("success", true, "orderId", orderId));
     }
