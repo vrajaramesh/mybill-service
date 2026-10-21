@@ -13,4 +13,6 @@ public record OrderSummary(String orderNo, String status, String channel, Intege
                            String customerPhone, String designCode, String designName, String sizeCode, int qty,
                            BigDecimal total, String currency, LocalDate estimatedDeliveryDate, String paymentStatus,
                            LocalDateTime paidAt, String razorpayPaymentId, String measurementStatus,
-                           LocalDateTime createdAt) {}
+                           LocalDateTime createdAt,
+                           /** GARMENT or FABRIC; fabric_metres is set for fabric orders. */
+                           String orderType, BigDecimal fabricMetres) {}

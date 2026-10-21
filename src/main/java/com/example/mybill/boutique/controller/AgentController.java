@@ -5,6 +5,7 @@ import com.example.mybill.boutique.payment.PaymentLinkService;
 import com.example.mybill.boutique.service.AgentCatalogService;
 import com.example.mybill.boutique.service.AgentCustomerService;
 import com.example.mybill.boutique.service.AgentOrderService;
+import com.example.mybill.boutique.service.FabricCatalogService;
 import com.example.mybill.boutique.service.MarketingService;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,6 +29,7 @@ public class AgentController {
     @Autowired private AgentOrderService orderService;
     @Autowired private PaymentLinkService paymentLinkService;
     @Autowired private MarketingService marketingService;
+    @Autowired private FabricCatalogService fabricCatalog;
 
     /** Newest active designs, e.g. ?limit=4 (1..20). Declared before {code} for readability; Spring prefers literals. */
     @GetMapping("/designs/latest")
@@ -38,6 +40,21 @@ public class AgentController {
     @GetMapping("/designs/{code}")
     public DesignDetailResponse design(@PathVariable String code) {
         return catalogService.getDesign(code);
+    }
+
+    /** In-stock fabrics sold by the metre matching q (words of the name/category/tags, or a FAB-&lt;id&gt; code). */
+    @GetMapping("/fabrics")
+    public List<FabricResponse> fabrics(@RequestParam(defaultValue = "") String q,
+                                        @RequestParam(defaultValue = "5") int limit) {
+        return fabricCatalog.search(q, limit);
+    }
+
+    /** One fabric by code (FAB-6223) or product id, including when it is out of stock. */
+    @GetMapping("/fabrics/{code}")
+    public FabricResponse fabric(@PathVariable String code) {
+        Integer id = FabricCatalogService.parseCode(code);
+        if (id == null) throw com.example.mybill.boutique.exception.AgentApiException.notFound("FABRIC_NOT_FOUND", "No fabric " + code);
+        return fabricCatalog.require(id);
     }
 
     @GetMapping("/size-chart")
@@ -82,6 +99,24 @@ public class AgentController {
             return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK).body(result.order());
         } catch (DataIntegrityViolationException e) {
             // Lost a race with a concurrent request carrying the same idempotency_key: return the winner's order.
+            return orderService.findByIdempotencyKey(request.idempotencyKey(), request.customerId())
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> e);
+        }
+    }
+
+    @PostMapping("/orders/fabric/quote")
+    public FabricQuoteResponse fabricQuote(@Valid @RequestBody FabricQuoteRequest request) {
+        return orderService.fabricQuote(request);
+    }
+
+    /** Fabric-only order: 201 new, 200 with the original order when the idempotency_key was already used. */
+    @PostMapping("/orders/fabric")
+    public ResponseEntity<OrderResponse> createFabricOrder(@Valid @RequestBody CreateFabricOrderRequest request) {
+        try {
+            AgentOrderService.CreateResult result = orderService.createFabric(request);
+            return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK).body(result.order());
+        } catch (DataIntegrityViolationException e) {
             return orderService.findByIdempotencyKey(request.idempotencyKey(), request.customerId())
                 .map(ResponseEntity::ok)
                 .orElseThrow(() -> e);

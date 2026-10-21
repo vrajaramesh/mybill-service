@@ -9,4 +9,6 @@ import java.util.Map;
 
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record OrderItemResponse(String designCode, String designName, String sizeCode, List<SelectedOptionDto> options,
-                                Map<String, Object> measurements, BigDecimal unitPrice, int qty, BigDecimal lineTotal) {}
+                                Map<String, Object> measurements, BigDecimal unitPrice, int qty, BigDecimal lineTotal,
+                                /** Fabric orders only: metres bought and the price per metre at order time. */
+                                BigDecimal fabricMetres, BigDecimal fabricPricePerMetre) {}

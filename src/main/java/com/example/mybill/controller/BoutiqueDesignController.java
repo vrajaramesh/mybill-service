@@ -27,9 +27,12 @@ public class BoutiqueDesignController {
         if (s == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
 
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-            "SELECT design_id, code, garment_type, description, rough_price, delivery_days, " +
-            "       image_url, public_id, is_active, exact_measurements, created_at " +
-            "FROM \"" + s + "\".boutique_designs ORDER BY garment_type, design_id");
+            "SELECT d.design_id, d.code, d.garment_type, d.description, d.rough_price, d.delivery_days, " +
+            "       d.image_url, d.public_id, d.is_active, d.exact_measurements, d.created_at, " +
+            "       d.fabric_product_id, p.product_name AS fabric_name, p.selling_price AS fabric_price " +
+            "FROM \"" + s + "\".boutique_designs d " +
+            "LEFT JOIN \"" + s + "\".products p ON p.product_id = d.fabric_product_id " +
+            "ORDER BY d.garment_type, d.design_id");
 
         if (rows.isEmpty()) return ResponseEntity.ok(List.of());
 
@@ -46,6 +49,9 @@ public class BoutiqueDesignController {
             item.put("isActive",     row.get("is_active"));
             item.put("code",         row.get("code"));
             item.put("exactMeasurements", Boolean.TRUE.equals(row.get("exact_measurements")));
+            item.put("fabricProductId", row.get("fabric_product_id"));
+            item.put("fabricName",   row.get("fabric_name"));
+            item.put("fabricPrice",  row.get("fabric_price"));
             item.put("createdAt",    row.get("created_at"));
             item.put("images",       new ArrayList<Map<String, Object>>());
             designMap.put(id, item);
@@ -116,6 +122,10 @@ public class BoutiqueDesignController {
 
         if (generatedIds.isEmpty()) return ResponseEntity.internalServerError().build();
         int designId = generatedIds.get(0);
+        if (body.containsKey("fabricProductId")) {
+            jdbcTemplate.update("UPDATE \"" + s + "\".boutique_designs SET fabric_product_id = ? WHERE design_id = ?",
+                fabricProductId(body), designId);
+        }
 
         // Code the AI agent uses to refer to the design (e.g. "Lehenga" #7 -> LEH-7), same rule as db/boutique/V1.
         boutiqueSchemaInitializer.ensureSchema(s);
@@ -149,8 +159,42 @@ public class BoutiqueDesignController {
             "UPDATE \"" + s + "\".boutique_designs SET garment_type = ?, description = ?, rough_price = ?, " +
             "delivery_days = ?, is_active = ?, exact_measurements = ?, updated_at = NOW() WHERE design_id = ?",
             garmentType, description, roughPrice, deliveryDays, isActive, exact, id);
+        if (body.containsKey("fabricProductId")) {   // fabric sold by the metre for this design (null = none)
+            jdbcTemplate.update("UPDATE \"" + s + "\".boutique_designs SET fabric_product_id = ? WHERE design_id = ?",
+                fabricProductId(body), id);
+        }
 
         return ResponseEntity.ok(Map.of("updated", true));
+    }
+
+    // ── Fabrics a design can be linked to (online products sold by the metre) ────
+
+    @GetMapping("/fabric-search")
+    public ResponseEntity<?> fabricSearch(@RequestParam(defaultValue = "") String q) {
+        String s = TenantContext.getCurrentTenant();
+        if (s == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
+        String like = "%" + q.trim().toLowerCase(Locale.ROOT) + "%";
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT product_id, product_name, category, selling_price, stock_quantity FROM \"" + s + "\".products " +
+            "WHERE is_active = TRUE AND COALESCE(is_online, FALSE) = TRUE AND selling_price > 0 " +
+            "AND LOWER(TRIM(COALESCE(unit, ''))) IN ('m','meter','meters','metre','metres','mts','mtr','mtrs') " +
+            "AND (LOWER(product_name) LIKE ? OR LOWER(COALESCE(category, '')) LIKE ? OR CAST(product_id AS TEXT) = ?) " +
+            "ORDER BY stock_quantity DESC NULLS LAST, product_id DESC LIMIT 20", like, like, q.trim());
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map<String, Object> r : rows) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("productId", r.get("product_id"));
+            m.put("name", r.get("product_name"));
+            m.put("category", r.get("category"));
+            m.put("pricePerMetre", r.get("selling_price"));
+            m.put("stockMetres", r.get("stock_quantity"));
+            out.add(m);
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    private static Integer fabricProductId(Map<String, Object> body) {
+        return body.get("fabricProductId") instanceof Number n ? n.intValue() : null;
     }
 
     // ── Delete design ────────────────────────────────────────────────────────

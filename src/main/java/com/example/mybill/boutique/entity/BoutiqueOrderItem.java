@@ -54,6 +54,12 @@ public class BoutiqueOrderItem {
     @Column(name = "line_total", nullable = false, precision = 10, scale = 2)
     private BigDecimal lineTotal;
 
+    // Fabric orders only (snapshot of the product at order time).
+    @Column(name = "fabric_product_id") private Integer fabricProductId;
+    @Column(name = "fabric_metres", precision = 8, scale = 2) private BigDecimal fabricMetres;
+    @Column(name = "fabric_unit", length = 20) private String fabricUnit;
+    @Column(name = "fabric_price_per_unit", precision = 10, scale = 2) private BigDecimal fabricPricePerUnit;
+
     public Integer getItemId() { return itemId; }
     public void setItemId(Integer itemId) { this.itemId = itemId; }
     public BoutiqueOrder getOrder() { return order; }
@@ -76,4 +82,12 @@ public class BoutiqueOrderItem {
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }
+    public Integer getFabricProductId() { return fabricProductId; }
+    public void setFabricProductId(Integer v) { this.fabricProductId = v; }
+    public BigDecimal getFabricMetres() { return fabricMetres; }
+    public void setFabricMetres(BigDecimal v) { this.fabricMetres = v; }
+    public String getFabricUnit() { return fabricUnit; }
+    public void setFabricUnit(String v) { this.fabricUnit = v; }
+    public BigDecimal getFabricPricePerUnit() { return fabricPricePerUnit; }
+    public void setFabricPricePerUnit(BigDecimal v) { this.fabricPricePerUnit = v; }
 }

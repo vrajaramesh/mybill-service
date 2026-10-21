@@ -1,5 +1,6 @@
 package com.example.mybill.boutique.service;
 
+import com.example.mybill.boutique.dto.FabricResponse;
 import com.example.mybill.boutique.dto.PriceBreakdown;
 import com.example.mybill.boutique.dto.SelectedOptionDto;
 import com.example.mybill.boutique.entity.BoutiqueDesign;
@@ -70,6 +71,27 @@ public class PricingService {
             .toList();
         return new PriceBreakdown(basePrice, optionDtos, money(optionsTotal), money(unitPrice), qty, money(subtotal),
             delivery, freeDeliveryAbove, money(subtotal.add(delivery)), CURRENCY);
+    }
+
+    /**
+     * Fabric by the metre: subtotal = price_per_metre x metres (metres in steps of 0.25, within stock);
+     * delivery as for garments. unit_price = price_per_metre, qty = 1.
+     */
+    public PriceBreakdown priceFabric(FabricResponse fabric, BigDecimal metres) {
+        if (metres == null || metres.compareTo(new BigDecimal("0.5")) < 0
+                || metres.multiply(BigDecimal.valueOf(4)).stripTrailingZeros().scale() > 0) {
+            throw AgentApiException.unprocessable("INVALID_METRES", "metres must be at least 0.5, in steps of 0.25",
+                Map.of("metres", String.valueOf(metres)));
+        }
+        if (metres.compareTo(fabric.availableMetres()) > 0) {
+            throw AgentApiException.unprocessable("INSUFFICIENT_STOCK", "Only " + fabric.availableMetres().stripTrailingZeros().toPlainString()
+                + " m of " + fabric.name() + " in stock", Map.of("available_metres", fabric.availableMetres(), "code", fabric.code()));
+        }
+        BigDecimal price = money(fabric.pricePerMetre());
+        BigDecimal subtotal = money(price.multiply(metres));
+        BigDecimal delivery = subtotal.compareTo(freeDeliveryAbove) >= 0 ? money(BigDecimal.ZERO) : deliveryFlatCharge;
+        return new PriceBreakdown(price, List.of(), money(BigDecimal.ZERO), price, 1, subtotal, delivery,
+            freeDeliveryAbove, money(subtotal.add(delivery)), CURRENCY);
     }
 
     /** Every requested option must exist, be active, belong to this design (or be global), one per group. */

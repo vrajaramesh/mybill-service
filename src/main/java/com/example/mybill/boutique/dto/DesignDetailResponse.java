@@ -19,5 +19,7 @@ public record DesignDetailResponse(
     List<ImageDto> images,
     List<OptionGroupDto> optionGroups,
     /** Our tailor calls the customer after payment to take exact measurements (blouse/choli, ...). */
-    boolean exactMeasurements
+    boolean exactMeasurements,
+    /** The design's fabric, sold by the metre (null when not linked or not an online metre fabric). */
+    FabricResponse fabric
 ) {}

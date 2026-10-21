@@ -12,6 +12,9 @@ import java.util.List;
 @Table(name = "boutique_orders")
 public class BoutiqueOrder {
 
+    public static final String TYPE_GARMENT = "GARMENT";
+    public static final String TYPE_FABRIC = "FABRIC";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "order_id")
@@ -66,6 +69,8 @@ public class BoutiqueOrder {
     @Column(name = "ctwa_clid", length = 500) private String ctwaClid;
 
     /** PENDING_CALL (paid, the tailor must call for exact measurements) -> TAKEN; NULL = not needed. */
+    /** GARMENT (stitched design) or FABRIC (metres of a fabric product, no stitching). */
+    @Column(name = "order_type", length = 10, nullable = false) private String orderType = TYPE_GARMENT;
     @Column(name = "measurement_status", length = 20) private String measurementStatus;
     @Column(name = "measurement_taken_at") private LocalDateTime measurementTakenAt;
     @Column(name = "measurement_taken_by", length = 100) private String measurementTakenBy;
@@ -130,6 +135,8 @@ public class BoutiqueOrder {
     public void setSourceId(String v) { this.sourceId = v; }
     public String getCtwaClid() { return ctwaClid; }
     public void setCtwaClid(String v) { this.ctwaClid = v; }
+    public String getOrderType() { return orderType; }
+    public void setOrderType(String v) { this.orderType = v; }
     public String getMeasurementStatus() { return measurementStatus; }
     public void setMeasurementStatus(String v) { this.measurementStatus = v; }
     public LocalDateTime getMeasurementTakenAt() { return measurementTakenAt; }

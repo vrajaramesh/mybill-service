@@ -36,10 +36,16 @@ public class AgentOrderService {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private ShippingService shippingService;
     @Autowired private BoutiqueCustomerRepository customerRepository;
+    @Autowired private FabricCatalogService fabricCatalog;
+    /** Days to cut and pack a fabric order before it ships. */
+    @org.springframework.beans.factory.annotation.Value("${boutique.fabric.dispatch-days:1}")
+    private int fabricDispatchDays;
     @Autowired @org.springframework.context.annotation.Lazy
     private com.example.mybill.boutique.payment.PaymentLinkService paymentLinkService;
 
     static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    /** size_code stored on fabric order items (no garment size). */
+    public static final String FABRIC_SIZE = "FABRIC";
     public static final String MEASUREMENT_PENDING = "PENDING_CALL";
     public static final String MEASUREMENT_TAKEN = "TAKEN";
     static final int MAX_LIST = 100;
@@ -127,6 +133,88 @@ public class AgentOrderService {
         return new CreateResult(toResponse(orderRepository.save(order)), true);
     }
 
+    /** Price for metres of a fabric, with delivery to the pincode if given; nothing is saved. */
+    @Transactional(readOnly = true)
+    public FabricQuoteResponse fabricQuote(FabricQuoteRequest request) {
+        FabricResponse fabric = fabricCatalog.require(request.productId());
+        PriceBreakdown b = pricingService.priceFabric(fabric, request.metres());
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(), fabricDispatchDays,
+            LocalDate.now(IST));
+        return new FabricQuoteResponse(fabric.productId(), fabric.code(), fabric.name(), request.metres(),
+            fabric.pricePerMetre(), b, ship.serviceable(), ship.transitDays(), ship.estimatedDeliveryDate());
+    }
+
+    /** A DRAFT fabric-only order (order_type FABRIC); same idempotency rules as {@link #create}. */
+    @Transactional
+    public CreateResult createFabric(CreateFabricOrderRequest request) {
+        Optional<BoutiqueOrder> existing = orderRepository.findByIdempotencyKey(request.idempotencyKey());
+        if (existing.isPresent()) return new CreateResult(toResponse(sameCustomer(existing.get(), request.customerId())), false);
+
+        if (!customerService.exists(request.customerId())) {
+            throw AgentApiException.unprocessable("CUSTOMER_NOT_FOUND", "No customer with id " + request.customerId(),
+                Map.of("customer_id", request.customerId()));
+        }
+        FabricResponse fabric = fabricCatalog.require(request.productId());
+        PriceBreakdown b = pricingService.priceFabric(fabric, request.metres());
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.delivery().pincode(),
+            fabricDispatchDays, LocalDate.now(IST));
+        if (!ship.serviceable()) {
+            throw AgentApiException.unprocessable("PINCODE_NOT_SERVICEABLE", "We cannot deliver to this pincode yet",
+                Map.of("pincode", request.delivery().pincode(), "reason", String.valueOf(ship.reason())));
+        }
+
+        BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), b, request.channel(),
+            request.idempotencyKey(), ship, request.sourceType(), request.sourceId(), request.ctwaClid());
+        order.setOrderType(BoutiqueOrder.TYPE_FABRIC);
+
+        BoutiqueOrderItem item = new BoutiqueOrderItem();
+        item.setDesignCode(fabric.code());
+        item.setDesignName(fabric.name());
+        item.setSizeCode(FABRIC_SIZE);
+        item.setOptionsSnapshot("[]");
+        item.setUnitPrice(b.subtotal());
+        item.setQuantity(1);
+        item.setLineTotal(b.subtotal());
+        item.setFabricProductId(fabric.productId());
+        item.setFabricMetres(request.metres().setScale(2, java.math.RoundingMode.UNNECESSARY));
+        item.setFabricUnit("metre");
+        item.setFabricPricePerUnit(fabric.pricePerMetre());
+        order.addItem(item);
+
+        return new CreateResult(toResponse(orderRepository.save(order)), true);
+    }
+
+    private BoutiqueOrder newOrder(Integer customerId, DeliveryDetails d, PriceBreakdown b, String channel,
+                                   String idempotencyKey, ShippingService.ShippingEstimate ship,
+                                   String sourceType, String sourceId, String ctwaClid) {
+        LocalDateTime now = LocalDateTime.now();
+        BoutiqueOrder order = new BoutiqueOrder();
+        order.setOrderNo("SB-" + orderRepository.nextOrderNumber());
+        order.setCustomerId(customerId);
+        order.setStatus(BoutiqueOrderStatus.DRAFT);
+        order.setDeliveryName(d.name().trim());
+        order.setDeliveryPhone(d.phone().trim());
+        order.setDeliveryAddressLine1(d.addressLine1().trim());
+        order.setDeliveryAddressLine2(d.addressLine2() == null || d.addressLine2().isBlank() ? null : d.addressLine2().trim());
+        order.setDeliveryCity(d.city().trim());
+        order.setDeliveryState(d.state().trim());
+        order.setDeliveryPincode(d.pincode());
+        order.setSubtotal(b.subtotal());
+        order.setDeliveryCharge(b.deliveryCharge());
+        order.setTotal(b.total());
+        order.setChannel(channel.toUpperCase(Locale.ROOT));
+        order.setIdempotencyKey(idempotencyKey);
+        order.setEstimatedDeliveryDate(ship.estimatedDeliveryDate());
+        if (sourceType != null && !sourceType.isBlank()) {
+            order.setSourceType(sourceType);
+            order.setSourceId(sourceId);
+        }
+        order.setCtwaClid(ctwaClid == null || ctwaClid.isBlank() ? null : ctwaClid.trim());
+        order.setCreatedAt(now);
+        order.setUpdatedAt(now);
+        return order;
+    }
+
     @Transactional(readOnly = true)
     public Optional<OrderResponse> findByIdempotencyKey(String key, Integer customerId) {
         return orderRepository.findByIdempotencyKey(key)
@@ -206,7 +294,8 @@ public class AgentOrderService {
                 first == null ? null : first.getSizeCode(), first == null ? 0 : first.getQuantity(),
                 o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(),
                 pay == null ? null : pay.getStatus(), o.getPaidAt(), pay == null ? null : pay.getRazorpayPaymentId(),
-                o.getMeasurementStatus(), o.getCreatedAt());
+                o.getMeasurementStatus(), o.getCreatedAt(), o.getOrderType(),
+                first == null ? null : first.getFabricMetres());
         }).toList();
     }
 
@@ -277,7 +366,7 @@ public class AgentOrderService {
                 fromJson(i.getOptionsSnapshot(), new TypeReference<List<SelectedOptionDto>>() {}),
                 i.getMeasurementsSnapshot() == null ? null
                     : fromJson(i.getMeasurementsSnapshot(), new TypeReference<Map<String, Object>>() {}),
-                i.getUnitPrice(), i.getQuantity(), i.getLineTotal()))
+                i.getUnitPrice(), i.getQuantity(), i.getLineTotal(), i.getFabricMetres(), i.getFabricPricePerUnit()))
             .toList();
         DeliveryDetails delivery = new DeliveryDetails(o.getDeliveryName(), o.getDeliveryPhone(),
             o.getDeliveryAddressLine1(), o.getDeliveryAddressLine2(), o.getDeliveryCity(), o.getDeliveryState(),
@@ -289,7 +378,7 @@ public class AgentOrderService {
                 .map(p -> paymentLinkService.toInfo(o, p)).orElse(null),
             o.getSourceType(), o.getSourceId(), o.getCtwaClid(),
             o.getMeasurementStatus(), o.getMeasurementTakenAt(), o.getMeasurementTakenBy(),
-            o.getCreatedAt());
+            o.getCreatedAt(), o.getOrderType());
     }
 
     private String toJson(Object value) {

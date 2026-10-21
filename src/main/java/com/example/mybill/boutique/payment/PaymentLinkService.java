@@ -188,10 +188,11 @@ public class PaymentLinkService {
         if (moveTo(order, BoutiqueOrderStatus.PAID)) {
             order.setPaidAt(paid);
         }
-        if (order.getStitchingOrderId() == null && !order.getItems().isEmpty()) {
+        boolean fabricOnly = BoutiqueOrder.TYPE_FABRIC.equals(order.getOrderType());   // nothing to stitch
+        if (!fabricOnly && order.getStitchingOrderId() == null && !order.getItems().isEmpty()) {
             order.setStitchingOrderId(createStitchingOrder(order, payment).getOrderId());
         }
-        if (order.getMeasurementStatus() == null && needsExactMeasurements(order)) {
+        if (!fabricOnly && order.getMeasurementStatus() == null && needsExactMeasurements(order)) {
             order.setMeasurementStatus(AgentOrderService.MEASUREMENT_PENDING);   // the tailor calls her
             log.info("MEASUREMENT_CALL_NEEDED order={}", order.getOrderNo());
         }
@@ -297,7 +298,8 @@ public class PaymentLinkService {
             AgentOrderService.MEASUREMENT_PENDING.equals(order.getMeasurementStatus()),
             item == null ? null : item.getDesignCode(),
             item == null ? null : item.getDesignName()
-                + (AgentCatalogService.CUSTOM_SIZE.equals(item.getSizeCode()) ? ", custom size" : ""));
+                + (AgentCatalogService.CUSTOM_SIZE.equals(item.getSizeCode()) ? ", custom size" : ""),
+            order.getOrderType());
     }
 
     /** A custom size, or any item's design flagged "exact measurements needed" in the catalog. */

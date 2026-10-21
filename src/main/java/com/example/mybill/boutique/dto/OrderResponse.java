@@ -29,5 +29,7 @@ public record OrderResponse(
     String measurementStatus,
     LocalDateTime measurementTakenAt,
     String measurementTakenBy,
-    LocalDateTime createdAt
+    LocalDateTime createdAt,
+    /** GARMENT or FABRIC. */
+    String orderType
 ) {}
