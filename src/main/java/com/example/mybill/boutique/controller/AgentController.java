@@ -30,6 +30,7 @@ public class AgentController {
     @Autowired private PaymentLinkService paymentLinkService;
     @Autowired private MarketingService marketingService;
     @Autowired private FabricCatalogService fabricCatalog;
+    @Autowired private com.example.mybill.boutique.service.DailyFiguresService dailyFigures;
 
     /** Newest active designs, e.g. ?limit=4 (1..20). Declared before {code} for readability; Spring prefers literals. */
     @GetMapping("/designs/latest")
@@ -55,6 +56,12 @@ public class AgentController {
         Integer id = FabricCatalogService.parseCode(code);
         if (id == null) throw com.example.mybill.boutique.exception.AgentApiException.notFound("FABRIC_NOT_FOUND", "No fabric " + code);
         return fabricCatalog.require(id);
+    }
+
+    /** One IST day's order/payment/website figures for the daily AI report, e.g. ?date=2026-10-21. */
+    @GetMapping("/reports/daily")
+    public java.util.Map<String, Object> dailyFigures(@RequestParam String date) {
+        return dailyFigures.figures(java.time.LocalDate.parse(date));
     }
 
     @GetMapping("/size-chart")

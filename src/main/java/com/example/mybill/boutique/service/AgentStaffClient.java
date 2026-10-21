@@ -38,9 +38,14 @@ public class AgentStaffClient {
     }
 
     public JsonNode post(String path, Map<String, ?> body) {
+        return post(path, body, Duration.ofSeconds(30));
+    }
+
+    /** POST with a longer timeout (e.g. generating the daily AI report takes 1-3 minutes). */
+    public JsonNode post(String path, Map<String, ?> body, Duration timeout) {
         try {
             return send(HttpRequest.newBuilder(uri(path)).header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))), path);
+                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body))), path, timeout);
         } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
@@ -74,9 +79,13 @@ public class AgentStaffClient {
     }
 
     private JsonNode send(HttpRequest.Builder builder, String path) {
+        return send(builder, path, Duration.ofSeconds(30));
+    }
+
+    private JsonNode send(HttpRequest.Builder builder, String path, Duration timeout) {
         HttpResponse<String> resp;
         try {
-            builder.timeout(Duration.ofSeconds(30));
+            builder.timeout(timeout);
             if (authEnabled) builder.header("Authorization", "Bearer " + idToken());
             resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         } catch (Exception e) {
