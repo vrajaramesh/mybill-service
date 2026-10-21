@@ -77,6 +77,19 @@ public class StaffChatController {
         return agent.post("/staff/conversations/" + uuid(id) + "/reply", payload);
     }
 
+    /** A customer's photo/video/document from the chat (downloaded from WhatsApp via the agent). */
+    @GetMapping("/{id}/media/{messageId}")
+    public ResponseEntity<byte[]> media(@PathVariable String id, @PathVariable String messageId) {
+        requireAgentFirm();
+        uuid(id);
+        AgentStaffClient.Media media = agent.getMedia("/staff/media/" + uuid(messageId));
+        if (media == null) throw AgentApiException.notFound("MEDIA_GONE", "This file is no longer available on WhatsApp");
+        return ResponseEntity.ok()
+            .contentType(org.springframework.http.MediaType.parseMediaType(media.contentType()))
+            .header("Cache-Control", "private, max-age=86400")
+            .body(media.bytes());
+    }
+
     @PostMapping("/{id}/resolve")
     public JsonNode resolve(@PathVariable String id) {
         requireAgentFirm();

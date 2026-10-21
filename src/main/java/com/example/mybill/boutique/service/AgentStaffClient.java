@@ -46,6 +46,26 @@ public class AgentStaffClient {
         }
     }
 
+    /** A file from the agent (customer media): body bytes and Content-Type. 404/410 -> null. */
+    public record Media(byte[] bytes, String contentType) {}
+
+    public Media getMedia(String path) {
+        HttpResponse<byte[]> resp;
+        try {
+            HttpRequest.Builder builder = HttpRequest.newBuilder(uri(path)).GET().timeout(Duration.ofSeconds(30));
+            if (authEnabled) builder.header("Authorization", "Bearer " + idToken());
+            resp = http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+        } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new AgentApiException(HttpStatus.SERVICE_UNAVAILABLE, "AGENT_UNAVAILABLE", "Chat service unavailable", null);
+        }
+        if (resp.statusCode() == 404 || resp.statusCode() == 410) return null;
+        if (resp.statusCode() / 100 != 2) {
+            throw new AgentApiException(HttpStatus.BAD_GATEWAY, "AGENT_ERROR", "Could not load the file", Map.of("path", path));
+        }
+        return new Media(resp.body(), resp.headers().firstValue("Content-Type").orElse("application/octet-stream"));
+    }
+
     private URI uri(String path) {
         if (agentUrl == null || agentUrl.isBlank()) {
             throw new AgentApiException(HttpStatus.SERVICE_UNAVAILABLE, "AGENT_NOT_CONFIGURED", "AGENT_EVENTS_URL is not set", null);
