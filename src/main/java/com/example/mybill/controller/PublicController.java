@@ -571,6 +571,36 @@ public class PublicController {
 
     // ── Boutique Designs ─────────────────────────────────────────────────────
 
+    /**
+     * Fabrics sold separately for a design (its srisafabrics.com links): product ids for the website's
+     * "?fabrics=FRO-11" page, which the WhatsApp assistant links to. Only active, online, in-stock products.
+     */
+    @GetMapping("/{firmCode}/designs/{code}/fabrics")
+    public ResponseEntity<?> designFabrics(@PathVariable String firmCode, @PathVariable String code) {
+        Optional<Firm> firmOpt = firmRepository.findByFirmCode(firmCode.toLowerCase().trim());
+        if (firmOpt.isEmpty() || !Boolean.TRUE.equals(firmOpt.get().getIsActive())) return ResponseEntity.notFound().build();
+        String s = firmOpt.get().getSchemaName();
+        if (!tableExistsInSchema(s, "boutique_design_fabrics")) return ResponseEntity.ok(Map.of("code", code, "productIds", List.of()));
+        List<Integer> ids = jdbcTemplate.queryForList(
+            "SELECT f.product_id FROM \"" + s + "\".boutique_design_fabrics f " +
+            "JOIN \"" + s + "\".boutique_designs d ON d.design_id = f.design_id " +
+            "JOIN \"" + s + "\".products p ON p.product_id = f.product_id " +
+            "WHERE UPPER(d.code) = UPPER(?) AND d.is_active = TRUE AND p.is_active = TRUE " +
+            "AND COALESCE(p.is_online, FALSE) = TRUE AND p.stock_quantity > 0 ORDER BY f.sort_order, f.id",
+            Integer.class, code.trim());
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("code", code.trim().toUpperCase(Locale.ROOT));
+        result.put("productIds", ids);
+        return ResponseEntity.ok(result);
+    }
+
+    private boolean tableExistsInSchema(String schema, String table) {
+        Integer n = jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? AND table_name = ?",
+            Integer.class, schema, table);
+        return n != null && n > 0;
+    }
+
     @GetMapping("/{firmCode}/boutique-designs")
     public ResponseEntity<?> getBoutiqueDesigns(
             @PathVariable String firmCode,
