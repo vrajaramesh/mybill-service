@@ -465,28 +465,21 @@ The report has one row per link (inactive ones too) plus **Unmapped/other**, and
 
 "Unmapped/other" collects ad/post ids that have no link **and** orders without a source (organic). Organic orders have no conversation events, so that row's conversion % is not comparable to the ad rows.
 
-## Fabric-only orders (fabric by the metre, no stitching)
+## Fabric only (bought on the shop website)
 
-A fabric is an active, online `products` row whose unit is metres (Meters / MTS / MTR ...). Its code is
-`FAB-<product_id>`, the price is `selling_price` per metre, and stock is `stock_quantity` (checked, never
-changed by these endpoints - staff bill it as usual when they ship). A design can be linked to its fabric
-(`boutique_designs.fabric_product_id`, set in mybill-ui → Boutique designs); `GET /api/agent/designs/{code}`
-then includes it as `fabric` (null when not linked).
+When a customer wants only the fabric, the agent sends website links and she buys on srisafabrics.com.
 
-- `GET /api/agent/fabrics?q=madras check&limit=5` - in-stock fabrics matching every word (name, category, tags,
-  description) or a `FAB-6223` code: `[{product_id, code, name, category, description, price_per_metre,
-  available_metres, currency, images:[{url, sort_order}]}]`.
-- `GET /api/agent/fabrics/FAB-6223` - one fabric (also when out of stock); 404 `FABRIC_NOT_FOUND`.
-- `POST /api/agent/orders/fabric/quote` `{product_id, metres, pincode?}` - metres 0.5-100 in steps of 0.25.
-  Returns `{product_id, code, name, metres, price_per_metre, breakdown, serviceable, transit_days,
-  estimated_delivery_date}`; breakdown subtotal = price_per_metre × metres, delivery as for garments.
-  422 `INVALID_METRES`, `INSUFFICIENT_STOCK` (details.available_metres).
-- `POST /api/agent/orders/fabric` `{customer_id, product_id, metres, delivery, channel, idempotency_key,
-  source_type?, source_id?, ctwa_clid?}` - a DRAFT order with `order_type` `FABRIC` (201 / 200 on a repeated
-  idempotency_key). The item has `design_code` = `FAB-<id>`, `size_code` = `FABRIC`, `fabric_metres` and
-  `fabric_price_per_metre`. Payment links work as for garments; when paid, no stitching order and no
-  measurement call are created, and the `order.paid` event carries `order_type`.
-- Dispatch time before shipping: `boutique.fabric.dispatch-days` (default 1).
+- **Design fabric links** (`boutique_design_fabrics`, V12): staff add product page links
+  (`https://srisafabrics.com/?product=6223`, host from `boutique.shop.base-url`) to a design in mybill-ui →
+  Boutique designs. `GET /api/agent/designs/{code}` returns them as `fabrics: [{id, url, product_id, label, name,
+  price, unit, in_stock, online, image_url}]` (product fields from the `?product=` id; empty list if none).
+  Admin: `PUT /api/boutique-designs/{id}/fabrics {"links":[{"url","label"}]}` (max 10, shop host only) and
+  `GET /api/boutique-designs/fabric-search?q=` (online products with their `url`).
+- **Fabric search** for other fabrics: `GET /api/agent/fabrics?q=madras check&limit=5` (in-stock online products
+  sold per metre, code `FAB-<product_id>`, with `shop_url`) and `GET /api/agent/fabrics/FAB-6223`.
+- Legacy (not used by the agent any more): `POST /api/agent/orders/fabric/quote` and `POST /api/agent/orders/fabric`
+  create a fabric-only order in chat (`order_type` `FABRIC`, V11); paid fabric orders skip stitching and the
+  measurement call.
 
 ## Data model notes
 

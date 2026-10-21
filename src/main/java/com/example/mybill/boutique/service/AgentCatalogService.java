@@ -24,7 +24,7 @@ public class AgentCatalogService {
     static final int MAX_LATEST = 20;
 
     @Autowired private BoutiqueDesignRepository designRepository;
-    @Autowired private FabricCatalogService fabricCatalog;
+    @Autowired private DesignFabricLinkService fabricLinks;
     @Autowired private BoutiqueDesignImageRepository imageRepository;
     @Autowired private CustomisationOptionRepository optionRepository;
     @Autowired private SizeChartRepository sizeChartRepository;
@@ -52,7 +52,7 @@ public class AgentCatalogService {
         return new DesignDetailResponse(design.getCode(), design.displayName(), design.getGarmentType(),
             design.getDescription(), design.getFabricDescription(), PricingService.money(design.getBasePrice()),
             design.getLeadTimeDays(), PricingService.CURRENCY, images, groups, design.needsExactMeasurements(),
-            design.getFabricProductId() == null ? null : fabricCatalog.find(design.getFabricProductId()).orElse(null));
+            fabricLinks.forDesign(design.getDesignId()));
     }
 
     /** Newest active designs with their first image. limit is clamped to 1..20. */

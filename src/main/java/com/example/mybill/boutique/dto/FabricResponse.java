@@ -13,4 +13,6 @@ import java.util.List;
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
 public record FabricResponse(Integer productId, String code, String name, String category, String description,
                              BigDecimal pricePerMetre, BigDecimal availableMetres, String currency,
-                             List<ImageDto> images) {}
+                             List<ImageDto> images,
+                             /** The product's page on the shop website, where she can buy it. */
+                             String shopUrl) {}

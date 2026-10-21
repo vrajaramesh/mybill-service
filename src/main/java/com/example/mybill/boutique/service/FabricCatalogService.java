@@ -39,6 +39,7 @@ public class FabricCatalogService {
         """;
 
     @PersistenceContext private EntityManager em;
+    @org.springframework.beans.factory.annotation.Autowired private DesignFabricLinkService links;
 
     /** product id from "FAB-6223", "fab6223" or "6223"; null if it isn't a fabric code. */
     public static Integer parseCode(String code) {
@@ -68,7 +69,7 @@ public class FabricCatalogService {
         for (int i = 0; i < words.size(); i++) q.setParameter(i + 1, "%" + words.get(i) + "%", String.class);
         List<?> rows = q.getResultList();
         Map<Integer, List<ImageDto>> images = images(rows.stream().map(r -> ((Number) ((Object[]) r)[0]).intValue()).toList());
-        return rows.stream().map(r -> toResponse((Object[]) r, images)).toList();
+        return rows.stream().map(r -> toResponse((Object[]) r, images, links)).toList();
     }
 
     /** A fabric by product id (also when out of stock); empty if it isn't an online metre fabric. */
@@ -76,7 +77,7 @@ public class FabricCatalogService {
     public java.util.Optional<FabricResponse> find(int productId) {
         List<?> rows = em.createNativeQuery(SELECT + " AND p.product_id = ?1").setParameter(1, productId).getResultList();
         if (rows.isEmpty()) return java.util.Optional.empty();
-        return java.util.Optional.of(toResponse((Object[]) rows.get(0), images(List.of(productId))));
+        return java.util.Optional.of(toResponse((Object[]) rows.get(0), images(List.of(productId)), links));
     }
 
     @Transactional(readOnly = true)
@@ -101,11 +102,11 @@ public class FabricCatalogService {
         return out;
     }
 
-    private static FabricResponse toResponse(Object[] a, Map<Integer, List<ImageDto>> images) {
+    private static FabricResponse toResponse(Object[] a, Map<Integer, List<ImageDto>> images, DesignFabricLinkService links) {
         int id = ((Number) a[0]).intValue();
         BigDecimal stock = a[5] == null ? BigDecimal.ZERO : new BigDecimal(a[5].toString());
         return new FabricResponse(id, CODE_PREFIX + id, (String) a[1], (String) a[2], (String) a[3],
             PricingService.money(new BigDecimal(a[4].toString())), stock.max(BigDecimal.ZERO).setScale(2, java.math.RoundingMode.DOWN),
-            PricingService.CURRENCY, images.getOrDefault(id, List.of()));
+            PricingService.CURRENCY, images.getOrDefault(id, List.of()), links.productUrl(id));
     }
 }
