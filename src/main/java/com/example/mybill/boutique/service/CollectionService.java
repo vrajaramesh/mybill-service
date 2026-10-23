@@ -100,7 +100,7 @@ public class CollectionService {
         boolean numeric = codeOrId.matches("\\d{1,9}");
         List<?> rows = em.createNativeQuery("""
                 SELECT collection_id, code, name, collection_type, description, cover_image_url, ai_instructions, is_active
-                  FROM boutique_collections WHERE """ + (numeric ? "collection_id = CAST(?1 AS INTEGER)" : "UPPER(code) = UPPER(?1)"))
+                  FROM boutique_collections""" + (numeric ? " WHERE collection_id = CAST(?1 AS INTEGER)" : " WHERE UPPER(code) = UPPER(?1)"))
             .setParameter(1, codeOrId.trim()).getResultList();
         if (rows.isEmpty()) throw AgentApiException.notFound("COLLECTION_NOT_FOUND", "No collection " + codeOrId);
         return (Object[]) rows.get(0);
