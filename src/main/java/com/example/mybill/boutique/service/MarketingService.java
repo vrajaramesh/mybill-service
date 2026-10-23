@@ -47,7 +47,7 @@ public class MarketingService {
     public List<MarketingLinkResponse> listLinks() {
         List<MarketingLink> links = linkRepository.findAllByOrderByActiveDescCreatedAtDescLinkIdDesc();
         Map<String, String> names = designNames();
-        return links.stream().map(l -> toResponse(l, names.get(l.getDesignCode()))).toList();
+        return links.stream().map(l -> toResponse(l, names.get(l.getTargetCode()))).toList();
     }
 
     @Transactional(readOnly = true)
@@ -62,7 +62,7 @@ public class MarketingService {
     @Transactional
     public MarketingLinkResponse createLink(MarketingLinkRequest request) {
         String sourceId = request.sourceId().trim();
-        BoutiqueDesign design = requireDesign(request.designCode());
+        Target target = target(request);
         if (linkRepository.findBySourceTypeAndSourceId(request.sourceType(), sourceId).isPresent()) {
             throw duplicate(request.sourceType(), sourceId);
         }
@@ -70,27 +70,29 @@ public class MarketingService {
         MarketingLink link = new MarketingLink();
         link.setSourceType(request.sourceType());
         link.setSourceId(sourceId);
-        link.setDesignCode(design.getCode());
+        link.setDesignCode(target.designCode());
+        link.setCollectionCode(target.collectionCode());
         link.setLabel(request.label().trim());
         link.setActive(request.active() == null || request.active());
         link.setPermalink(uniquePermalink(request.sourceType(), request.permalink(), null));
         link.setCreatedBy(MarketingLink.MANUAL);
         link.setCreatedAt(now);
         link.setUpdatedAt(now);
-        return toResponse(linkRepository.save(link), design.displayName());
+        return toResponse(linkRepository.save(link), target.name());
     }
 
     @Transactional
     public MarketingLinkResponse updateLink(int linkId, MarketingLinkRequest request) {
         MarketingLink link = requireLink(linkId);
         String sourceId = request.sourceId().trim();
-        BoutiqueDesign design = requireDesign(request.designCode());
+        Target target = target(request);
         linkRepository.findBySourceTypeAndSourceId(request.sourceType(), sourceId)
             .filter(other -> !other.getLinkId().equals(link.getLinkId()))
             .ifPresent(other -> { throw duplicate(request.sourceType(), sourceId); });
         link.setSourceType(request.sourceType());
         link.setSourceId(sourceId);
-        link.setDesignCode(design.getCode());
+        link.setDesignCode(target.designCode());
+        link.setCollectionCode(target.collectionCode());
         link.setLabel(request.label().trim());
         if (request.active() != null) link.setActive(request.active());
         if (request.permalink() != null) {   // omitted (e.g. the mybill-ui form) = keep; "" = clear
@@ -98,7 +100,7 @@ public class MarketingService {
         }
         link.setCreatedBy(MarketingLink.MANUAL);   // edited by staff: the Instagram sync leaves it alone from now on
         link.setUpdatedAt(LocalDateTime.now());
-        return toResponse(linkRepository.save(link), design.displayName());
+        return toResponse(linkRepository.save(link), target.name());
     }
 
     /** Soft delete: the link keeps its history in the report but no longer resolves for new conversations. */
@@ -107,7 +109,7 @@ public class MarketingService {
         MarketingLink link = requireLink(linkId);
         link.setActive(active);
         link.setUpdatedAt(LocalDateTime.now());
-        return toResponse(linkRepository.save(link), designNames().get(link.getDesignCode()));
+        return toResponse(linkRepository.save(link), designNames().get(link.getTargetCode()));
     }
 
     // ── Agent ────────────────────────────────────────────────────────────────
@@ -132,7 +134,7 @@ public class MarketingService {
             ? linkRepository.findBySourceTypeAndSourceId(sourceType, sourceId)
             : linkRepository.findBySourceTypeAndPermalink(sourceType, url);
         return link.filter(MarketingLink::isActive)
-            .map(l -> new MarketingLinkResolveResponse(l.getDesignCode(), l.getLabel()))
+            .map(l -> new MarketingLinkResolveResponse(l.getDesignCode(), l.getLabel(), l.getCollectionCode()))
             .orElseThrow(() -> AgentApiException.notFound("MARKETING_LINK_NOT_FOUND",
                 "No active marketing link for " + sourceType + " " + (sourceId.isEmpty() ? url : sourceId)));
     }
@@ -357,7 +359,7 @@ public class MarketingService {
         for (MarketingLink l : links) {
             Counts c = Optional.ofNullable(bySource.remove(new Key(l.getSourceType(), l.getSourceId()))).orElseGet(Counts::new);
             total.add(c);
-            result.add(row(l.getLinkId(), l.getSourceType(), l.getSourceId(), l.getDesignCode(), l.getLabel(), l.isActive(), c));
+            result.add(row(l.getLinkId(), l.getSourceType(), l.getSourceId(), l.getTargetCode(), l.getLabel(), l.isActive(), c));
         }
         Counts unmapped = new Counts();
         bySource.values().forEach(unmapped::add);
@@ -386,6 +388,25 @@ public class MarketingService {
             .orElseThrow(() -> AgentApiException.notFound("MARKETING_LINK_NOT_FOUND", "No marketing link " + linkId));
     }
 
+    private record Target(String designCode, String collectionCode, String name) {}
+
+    /** The design or collection a link request points at (validated). */
+    private Target target(MarketingLinkRequest request) {
+        if (request.collectionCode() != null && !request.collectionCode().isBlank()) {
+            String code = request.collectionCode().trim();
+            List<?> rows = em.createNativeQuery("SELECT code, name FROM boutique_collections WHERE UPPER(code) = UPPER(?1)")
+                .setParameter(1, code).getResultList();
+            if (rows.isEmpty()) {
+                throw AgentApiException.unprocessable("COLLECTION_NOT_FOUND", "No collection with code " + code,
+                    Map.of("collection_code", code));
+            }
+            Object[] row = (Object[]) rows.get(0);
+            return new Target(null, (String) row[0], (String) row[1]);
+        }
+        BoutiqueDesign design = requireDesign(request.designCode());
+        return new Target(design.getCode(), null, design.displayName());
+    }
+
     private BoutiqueDesign requireDesign(String code) {
         return designRepository.findByCodeIgnoreCase(code.trim())
             .orElseThrow(() -> AgentApiException.unprocessable("DESIGN_NOT_FOUND", "No design with code " + code,
@@ -396,13 +417,20 @@ public class MarketingService {
         return AgentApiException.conflict("MARKETING_LINK_EXISTS", "A link for " + type + " " + id + " already exists");
     }
 
+    /** Display names of designs and collections by code (link targets). */
     private Map<String, String> designNames() {
-        return designRepository.findAll().stream().filter(d -> d.getCode() != null)
-            .collect(Collectors.toMap(BoutiqueDesign::getCode, BoutiqueDesign::displayName, (a, b) -> a));
+        Map<String, String> names = new java.util.HashMap<>(designRepository.findAll().stream().filter(d -> d.getCode() != null)
+            .collect(Collectors.toMap(BoutiqueDesign::getCode, BoutiqueDesign::displayName, (a, b) -> a)));
+        for (Object r : em.createNativeQuery("SELECT code, name FROM boutique_collections").getResultList()) {
+            Object[] a = (Object[]) r;
+            names.putIfAbsent((String) a[0], (String) a[1]);
+        }
+        return names;
     }
 
     private static MarketingLinkResponse toResponse(MarketingLink l, String designName) {
         return new MarketingLinkResponse(l.getLinkId(), l.getSourceType(), l.getSourceId(), l.getDesignCode(),
-            designName, l.getLabel(), l.isActive(), l.getPermalink(), l.getCreatedBy(), l.getCreatedAt(), l.getUpdatedAt());
+            designName, l.getLabel(), l.isActive(), l.getPermalink(), l.getCreatedBy(), l.getCreatedAt(), l.getUpdatedAt(),
+            l.getCollectionCode());
     }
 }

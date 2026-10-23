@@ -30,6 +30,7 @@ public class AgentController {
     @Autowired private PaymentLinkService paymentLinkService;
     @Autowired private MarketingService marketingService;
     @Autowired private FabricCatalogService fabricCatalog;
+    @Autowired private com.example.mybill.boutique.service.CollectionService collectionService;
     @Autowired private com.example.mybill.boutique.service.DailyFiguresService dailyFigures;
 
     /** Newest active designs, e.g. ?limit=4 (1..20). Declared before {code} for readability; Spring prefers literals. */
@@ -62,6 +63,18 @@ public class AgentController {
     @GetMapping("/reports/daily")
     public java.util.Map<String, Object> dailyFigures(@RequestParam String date) {
         return dailyFigures.figures(java.time.LocalDate.parse(date));
+    }
+
+    /** A fabric / readymade collection with its items (codes, colours, prices, stock, sizes, photos, instructions). */
+    @GetMapping("/collections/{code}")
+    public java.util.Map<String, Object> collection(@PathVariable String code) {
+        return collectionService.get(code);
+    }
+
+    /** One collection item by its code (e.g. MCS-1B), with its collection. */
+    @GetMapping("/collection-items/{code}")
+    public java.util.Map<String, Object> collectionItem(@PathVariable String code) {
+        return collectionService.item(code);
     }
 
     @GetMapping("/size-chart")

@@ -27,8 +27,13 @@ public class MarketingLink {
     @Column(name = "source_id", nullable = false, length = 40)
     private String sourceId;
 
-    @Column(name = "design_code", nullable = false, length = 30)
+    /** The design promoted (or null when the link points at a collection). */
+    @Column(name = "design_code", length = 30)
     private String designCode;
+
+    /** The fabric/readymade collection promoted (or null when the link points at a design). */
+    @Column(name = "collection_code", length = 30)
+    private String collectionCode;
 
     @Column(name = "label", nullable = false, length = 150)
     private String label;
@@ -55,6 +60,10 @@ public class MarketingLink {
     public void setSourceType(String sourceType) { this.sourceType = sourceType; }
     public String getSourceId() { return sourceId; }
     public void setSourceId(String sourceId) { this.sourceId = sourceId; }
+    public String getCollectionCode() { return collectionCode; }
+    public void setCollectionCode(String collectionCode) { this.collectionCode = collectionCode; }
+    /** Design or collection code - whichever this link promotes. */
+    public String getTargetCode() { return designCode != null ? designCode : collectionCode; }
     public String getDesignCode() { return designCode; }
     public void setDesignCode(String designCode) { this.designCode = designCode; }
     public String getLabel() { return label; }

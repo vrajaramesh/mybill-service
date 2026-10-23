@@ -18,5 +18,7 @@ public record MarketingLinkResponse(
     /** MANUAL (staff, never changed by the Instagram sync) or AUTO (sync-ig-media). */
     String createdBy,
     LocalDateTime createdAt,
-    LocalDateTime updatedAt
+    LocalDateTime updatedAt,
+    /** Set when the link promotes a collection (design_code is then null; design_name holds the collection name). */
+    String collectionCode
 ) {}

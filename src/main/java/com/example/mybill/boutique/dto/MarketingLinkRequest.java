@@ -17,7 +17,7 @@ public record MarketingLinkRequest(
     @Pattern(regexp = "^\\s*[0-9]{1,40}\\s*$", message = "source_id must be numeric (the ad or post ID from Meta)")
     String sourceId,
 
-    @NotBlank(message = "design_code is required")
+    /** Exactly one of design_code / collection_code. */
     String designCode,
 
     @NotBlank(message = "label is required")
@@ -28,5 +28,14 @@ public record MarketingLinkRequest(
 
     /** Optional Instagram post URL (IG_MEDIA), so the agent can resolve the post by its link. */
     @Size(max = 500, message = "permalink must be at most 500 characters")
-    String permalink
-) {}
+    String permalink,
+    String collectionCode
+) {
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @jakarta.validation.constraints.AssertTrue(message = "choose a design or a collection")
+    public boolean isTargetGiven() {
+        boolean design = designCode != null && !designCode.isBlank();
+        boolean collection = collectionCode != null && !collectionCode.isBlank();
+        return design != collection;
+    }
+}

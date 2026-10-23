@@ -31,7 +31,7 @@ public class PricingService {
     private final BigDecimal deliveryFlatCharge;
     private final BigDecimal freeDeliveryAbove;
 
-    public PricingService(@Value("${boutique.delivery.flat-charge:100}") BigDecimal deliveryFlatCharge,
+    public PricingService(@Value("${boutique.delivery.flat-charge:150}") BigDecimal deliveryFlatCharge,
                           @Value("${boutique.delivery.free-above:2500}") BigDecimal freeDeliveryAbove) {
         this.deliveryFlatCharge = money(deliveryFlatCharge);
         this.freeDeliveryAbove = money(freeDeliveryAbove);
