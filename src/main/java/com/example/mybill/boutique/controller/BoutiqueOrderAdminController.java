@@ -31,9 +31,11 @@ public class BoutiqueOrderAdminController {
     @GetMapping
     public List<OrderSummary> list(@RequestParam(required = false) String status,
                                    @RequestParam(required = false) String measurement,
+                                   @RequestParam(required = false) String dispatch,
                                    @RequestParam(defaultValue = "50") int limit) {
         requireFirm();
         if ("pending".equalsIgnoreCase(measurement)) return orderService.pendingMeasurementCalls(limit);
+        if ("pending".equalsIgnoreCase(dispatch)) return orderService.pendingDispatch(limit);
         return orderService.list(status, limit);
     }
 
@@ -41,7 +43,15 @@ public class BoutiqueOrderAdminController {
     @GetMapping("/count")
     public Map<String, Long> count(@RequestParam(defaultValue = "pending") String measurement) {
         requireFirm();
-        return Map.of("measurement_pending", orderService.countPendingMeasurementCalls());
+        return Map.of("measurement_pending", orderService.countPendingMeasurementCalls(),
+            "dispatch_pending", orderService.countPendingDispatch());
+    }
+
+    /** Packed and sent (paid fabric / readymade orders, or a stitched order that is ready). */
+    @PostMapping("/{orderNo}/dispatched")
+    public OrderResponse dispatched(@PathVariable String orderNo, HttpServletRequest request) {
+        requireFirm();
+        return orderService.markDispatched(orderNo, staffName(request));
     }
 
     @PostMapping("/{orderNo}/measurements-taken")

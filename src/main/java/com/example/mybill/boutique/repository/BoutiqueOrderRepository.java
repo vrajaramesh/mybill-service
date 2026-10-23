@@ -23,6 +23,11 @@ public interface BoutiqueOrderRepository extends JpaRepository<BoutiqueOrder, In
 
     List<BoutiqueOrder> findByMeasurementStatusOrderByPaidAtAscOrderIdAsc(String measurementStatus, Pageable page);
 
+    /** Paid goods (fabric / readymade) orders waiting to be dispatched, oldest payment first. */
+    List<BoutiqueOrder> findByStatusAndOrderTypeNotOrderByPaidAtAscOrderIdAsc(BoutiqueOrderStatus status, String orderType, Pageable page);
+
+    long countByStatusAndOrderTypeNot(BoutiqueOrderStatus status, String orderType);
+
     long countByMeasurementStatus(String measurementStatus);
 
     /** Next number from the per-firm sequence (resolved through the tenant's search_path). */

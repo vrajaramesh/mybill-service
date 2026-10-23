@@ -297,6 +297,34 @@ public class AgentOrderService {
         return summaries(orders);
     }
 
+    /** Paid goods orders (fabric / readymade) waiting to be packed and dispatched, oldest payment first. */
+    @Transactional(readOnly = true)
+    public List<OrderSummary> pendingDispatch(int limit) {
+        return summaries(orderRepository.findByStatusAndOrderTypeNotOrderByPaidAtAscOrderIdAsc(BoutiqueOrderStatus.PAID,
+            BoutiqueOrder.TYPE_GARMENT, PageRequest.of(0, Math.max(1, Math.min(limit, MAX_LIST)))));
+    }
+
+    @Transactional(readOnly = true)
+    public long countPendingDispatch() {
+        return orderRepository.countByStatusAndOrderTypeNot(BoutiqueOrderStatus.PAID, BoutiqueOrder.TYPE_GARMENT);
+    }
+
+    /** Staff packed and sent the order (paid / in stitching -> DISPATCHED; idempotent). */
+    @Transactional
+    public OrderResponse markDispatched(String orderNo, String staff) {
+        BoutiqueOrder order = orderRepository.findByOrderNo(orderNo.trim().toUpperCase(Locale.ROOT))
+            .orElseThrow(() -> AgentApiException.notFound("ORDER_NOT_FOUND", "No order " + orderNo));
+        if (order.getStatus() == BoutiqueOrderStatus.DISPATCHED) return toResponse(order);
+        if (order.getStatus() != BoutiqueOrderStatus.PAID && order.getStatus() != BoutiqueOrderStatus.IN_STITCHING) {
+            throw AgentApiException.conflict("ORDER_NOT_DISPATCHABLE", "Only paid orders can be marked dispatched (this one is "
+                + order.getStatus() + ")");
+        }
+        order.setStatus(BoutiqueOrderStatus.DISPATCHED);
+        order.setUpdatedAt(LocalDateTime.now());
+        org.slf4j.LoggerFactory.getLogger(AgentOrderService.class).info("ORDER_DISPATCHED order={} by={}", order.getOrderNo(), staff);
+        return toResponse(orderRepository.save(order));
+    }
+
     /** Paid orders waiting for the tailor's measurement call, oldest payment first. */
     @Transactional(readOnly = true)
     public List<OrderSummary> pendingMeasurementCalls(int limit) {
@@ -351,7 +379,7 @@ public class AgentOrderService {
                 o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(),
                 pay == null ? null : pay.getStatus(), o.getPaidAt(), pay == null ? null : pay.getRazorpayPaymentId(),
                 o.getMeasurementStatus(), o.getCreatedAt(), o.getOrderType(),
-                first == null ? null : first.getFabricMetres());
+                first == null ? null : first.getFabricMetres(), o.getItems().size());
         }).toList();
     }
 

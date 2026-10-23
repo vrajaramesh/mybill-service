@@ -55,6 +55,18 @@ public class DailyFiguresService {
             byDesign.add(Map.of("design", a[0] + " " + a[1], "orders", num(a[2]), "paid", num(a[3])));
         }
         chat.put("orders_by_design", byDesign);
+        Map<String, Object> byType = new LinkedHashMap<>();
+        for (Object r : em.createNativeQuery("""
+                SELECT COALESCE(order_type, 'GARMENT'), COUNT(*), COUNT(paid_at), COALESCE(SUM(total) FILTER (WHERE paid_at IS NOT NULL), 0)
+                  FROM boutique_orders WHERE created_at >= CAST(?1 AS TIMESTAMP) AND created_at < CAST(?2 AS TIMESTAMP)
+                 GROUP BY 1""").setParameter(1, from).setParameter(2, to).getResultList()) {
+            Object[] a = (Object[]) r;
+            byType.put(String.valueOf(a[0]).toLowerCase(), Map.of("orders", num(a[1]), "paid", num(a[2]), "revenue_paid", money(a[3])));
+        }
+        chat.put("orders_by_type", byType);   // garment (stitched) / fabric / readymade / mixed
+        Object dispatch = em.createNativeQuery(
+            "SELECT COUNT(*) FROM boutique_orders WHERE status = 'PAID' AND COALESCE(order_type, 'GARMENT') <> 'GARMENT'").getSingleResult();
+        chat.put("goods_waiting_dispatch_now", num(dispatch));
         out.put("whatsapp_orders", chat);
 
         Map<String, Object> web = new LinkedHashMap<>();
