@@ -49,6 +49,7 @@ public class PaymentLinkService {
     @Autowired private RazorpayPaymentLinkClient razorpay;
     @Autowired private ApplicationEventPublisher events;
     @Autowired private ObjectMapper objectMapper;
+    @Autowired private com.example.mybill.boutique.service.GoodsService goodsService;
 
     @Value("${boutique.payment.link-expiry-hours:24}") private int expiryHours;
     @Value("${boutique.payment.callback-url:}") private String callbackUrl;
@@ -188,7 +189,12 @@ public class PaymentLinkService {
         if (moveTo(order, BoutiqueOrderStatus.PAID)) {
             order.setPaidAt(paid);
         }
-        boolean fabricOnly = BoutiqueOrder.TYPE_FABRIC.equals(order.getOrderType());   // nothing to stitch
+        boolean fabricOnly = order.isGoods();   // fabric / readymade: nothing to stitch, dispatched from stock
+        if (fabricOnly && order.getStockReducedAt() == null) {
+            goodsService.reduceStock(order);
+            order.setStockReducedAt(now());
+            log.info("STOCK_REDUCED order={}", order.getOrderNo());
+        }
         if (!fabricOnly && order.getStitchingOrderId() == null && !order.getItems().isEmpty()) {
             order.setStitchingOrderId(createStitchingOrder(order, payment).getOrderId());
         }
@@ -299,7 +305,18 @@ public class PaymentLinkService {
             item == null ? null : item.getDesignCode(),
             item == null ? null : item.getDesignName()
                 + (AgentCatalogService.CUSTOM_SIZE.equals(item.getSizeCode()) ? ", custom size" : ""),
-            order.getOrderType());
+            order.getOrderType(), order.isGoods() ? itemsSummary(order) : null,
+            String.join(", ", java.util.stream.Stream.of(order.getDeliveryName(), order.getDeliveryAddressLine1(),
+                order.getDeliveryAddressLine2(), order.getDeliveryCity(), order.getDeliveryState() + " " + order.getDeliveryPincode())
+                .filter(v -> v != null && !v.isBlank()).toList()));
+    }
+
+    /** "MCS-1B Blue check – 2.5 m; KUR-3A – size M × 2" for the staff dispatch alert. */
+    private static String itemsSummary(BoutiqueOrder order) {
+        return order.getItems().stream().map(i -> i.getDesignCode() + " " + i.getDesignName() + " – "
+                + (i.getFabricMetres() != null ? i.getFabricMetres().stripTrailingZeros().toPlainString() + " m"
+                   : ("-".equals(i.getSizeCode()) ? "" : "size " + i.getSizeCode() + " ") + "× " + i.getQuantity()))
+            .collect(java.util.stream.Collectors.joining("; "));
     }
 
     /** A custom size, or any item's design flagged "exact measurements needed" in the catalog. */

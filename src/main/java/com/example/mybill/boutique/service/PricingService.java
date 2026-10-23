@@ -94,6 +94,14 @@ public class PricingService {
             freeDeliveryAbove, money(subtotal.add(delivery)), CURRENCY);
     }
 
+    /** Breakdown for a goods cart whose lines are already priced: delivery on the subtotal as for every order. */
+    public PriceBreakdown priceSubtotal(BigDecimal subtotalIn) {
+        BigDecimal subtotal = money(subtotalIn);
+        BigDecimal delivery = subtotal.compareTo(freeDeliveryAbove) >= 0 ? money(BigDecimal.ZERO) : deliveryFlatCharge;
+        return new PriceBreakdown(subtotal, List.of(), money(BigDecimal.ZERO), subtotal, 1, subtotal, delivery,
+            freeDeliveryAbove, money(subtotal.add(delivery)), CURRENCY);
+    }
+
     /** Every requested option must exist, be active, belong to this design (or be global), one per group. */
     private List<CustomisationOption> validateOptions(BoutiqueDesign design, Collection<Integer> requestedIds,
                                                       Collection<CustomisationOption> candidates) {

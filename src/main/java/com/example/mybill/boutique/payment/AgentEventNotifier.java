@@ -65,6 +65,8 @@ public class AgentEventNotifier {
         body.put("design_code", event.designCode());
         body.put("design_name", event.designName());
         body.put("order_type", event.orderType());
+        if (event.items() != null) body.put("items", event.items());
+        if (event.deliveryAddress() != null) body.put("delivery_address", event.deliveryAddress());
         return post(body, event.event() + " " + event.orderNo());
     }
 

@@ -125,6 +125,25 @@ public class AgentController {
         }
     }
 
+    /** Goods cart price: [{item_code | product_id, quantity (metres / pieces), size}], pincode. */
+    @PostMapping("/orders/goods/quote")
+    public GoodsQuoteResponse goodsQuote(@Valid @RequestBody GoodsQuoteRequest request) {
+        return orderService.goodsQuote(request);
+    }
+
+    /** Goods order (fabric / readymade lines): 201 new, 200 with the original order on a repeated idempotency_key. */
+    @PostMapping("/orders/goods")
+    public ResponseEntity<OrderResponse> createGoodsOrder(@Valid @RequestBody CreateGoodsOrderRequest request) {
+        try {
+            AgentOrderService.CreateResult result = orderService.createGoods(request);
+            return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK).body(result.order());
+        } catch (DataIntegrityViolationException e) {
+            return orderService.findByIdempotencyKey(request.idempotencyKey(), request.customerId())
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> e);
+        }
+    }
+
     @PostMapping("/orders/fabric/quote")
     public FabricQuoteResponse fabricQuote(@Valid @RequestBody FabricQuoteRequest request) {
         return orderService.fabricQuote(request);

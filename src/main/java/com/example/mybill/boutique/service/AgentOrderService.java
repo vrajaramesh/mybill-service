@@ -37,6 +37,7 @@ public class AgentOrderService {
     @Autowired private ShippingService shippingService;
     @Autowired private BoutiqueCustomerRepository customerRepository;
     @Autowired private FabricCatalogService fabricCatalog;
+    @Autowired private GoodsService goodsService;
     /** Days to cut and pack a fabric order before it ships. */
     @org.springframework.beans.factory.annotation.Value("${boutique.fabric.dispatch-days:1}")
     private int fabricDispatchDays;
@@ -181,6 +182,61 @@ public class AgentOrderService {
         item.setFabricPricePerUnit(fabric.pricePerMetre());
         order.addItem(item);
 
+        return new CreateResult(toResponse(orderRepository.save(order)), true);
+    }
+
+    /** Price for a goods cart (fabric / readymade lines) with delivery to the pincode if given; nothing saved. */
+    @Transactional(readOnly = true)
+    public GoodsQuoteResponse goodsQuote(GoodsQuoteRequest request) {
+        GoodsService.Priced p = goodsService.price(request.lines());
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(), fabricDispatchDays, LocalDate.now(IST));
+        return new GoodsQuoteResponse(p.lines(), p.breakdown(), p.orderType(), ship.serviceable(), ship.transitDays(),
+            ship.estimatedDeliveryDate());
+    }
+
+    /** A DRAFT goods order (order_type FABRIC / READYMADE / MIXED); same idempotency rules as {@link #create}. */
+    @Transactional
+    public CreateResult createGoods(CreateGoodsOrderRequest request) {
+        Optional<BoutiqueOrder> existing = orderRepository.findByIdempotencyKey(request.idempotencyKey());
+        if (existing.isPresent()) return new CreateResult(toResponse(sameCustomer(existing.get(), request.customerId())), false);
+        if (!customerService.exists(request.customerId())) {
+            throw AgentApiException.unprocessable("CUSTOMER_NOT_FOUND", "No customer with id " + request.customerId(),
+                Map.of("customer_id", request.customerId()));
+        }
+        GoodsService.Priced p = goodsService.price(request.lines());
+        ShippingService.ShippingEstimate ship = shippingService.estimate(request.delivery().pincode(), fabricDispatchDays,
+            LocalDate.now(IST));
+        if (!ship.serviceable()) {
+            throw AgentApiException.unprocessable("PINCODE_NOT_SERVICEABLE", "We cannot deliver to this pincode yet",
+                Map.of("pincode", request.delivery().pincode(), "reason", String.valueOf(ship.reason())));
+        }
+        BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), p.breakdown(), request.channel(),
+            request.idempotencyKey(), ship, request.sourceType(), request.sourceId(), request.ctwaClid());
+        order.setOrderType(p.orderType());
+        for (GoodsLineResponse l : p.lines()) {
+            boolean fabric = GoodsService.FABRIC.equals(l.kind());
+            BoutiqueOrderItem item = new BoutiqueOrderItem();
+            item.setItemKind(l.kind());
+            item.setItemCode(l.itemCode());
+            item.setDesignCode(l.itemCode() != null ? l.itemCode() : (fabric ? FabricCatalogService.CODE_PREFIX : "PRD-") + l.productId());
+            String name = l.name() + (l.colour() != null && !l.colour().isBlank() ? " – " + l.colour() : "");
+            item.setDesignName(name.length() > 150 ? name.substring(0, 150) : name);
+            item.setSizeCode(fabric ? FABRIC_SIZE : (l.size() != null ? l.size() : "-"));
+            item.setOptionsSnapshot("[]");
+            item.setFabricProductId(l.productId());
+            item.setFabricPricePerUnit(l.unitPrice());
+            item.setFabricUnit(l.unit());
+            if (fabric) {
+                item.setFabricMetres(l.quantity().setScale(2, java.math.RoundingMode.UNNECESSARY));
+                item.setQuantity(1);
+                item.setUnitPrice(l.lineTotal());
+            } else {
+                item.setQuantity(l.quantity().intValueExact());
+                item.setUnitPrice(l.unitPrice());
+            }
+            item.setLineTotal(l.lineTotal());
+            order.addItem(item);
+        }
         return new CreateResult(toResponse(orderRepository.save(order)), true);
     }
 
@@ -366,7 +422,8 @@ public class AgentOrderService {
                 fromJson(i.getOptionsSnapshot(), new TypeReference<List<SelectedOptionDto>>() {}),
                 i.getMeasurementsSnapshot() == null ? null
                     : fromJson(i.getMeasurementsSnapshot(), new TypeReference<Map<String, Object>>() {}),
-                i.getUnitPrice(), i.getQuantity(), i.getLineTotal(), i.getFabricMetres(), i.getFabricPricePerUnit()))
+                i.getUnitPrice(), i.getQuantity(), i.getLineTotal(), i.getFabricMetres(), i.getFabricPricePerUnit(),
+                i.getItemKind(), i.getItemCode()))
             .toList();
         DeliveryDetails delivery = new DeliveryDetails(o.getDeliveryName(), o.getDeliveryPhone(),
             o.getDeliveryAddressLine1(), o.getDeliveryAddressLine2(), o.getDeliveryCity(), o.getDeliveryState(),

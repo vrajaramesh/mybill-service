@@ -14,6 +14,8 @@ public class BoutiqueOrder {
 
     public static final String TYPE_GARMENT = "GARMENT";
     public static final String TYPE_FABRIC = "FABRIC";
+    public static final String TYPE_READYMADE = "READYMADE";
+    public static final String TYPE_MIXED = "MIXED";        // fabric and readymade lines in one order
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -72,6 +74,7 @@ public class BoutiqueOrder {
     /** GARMENT (stitched design) or FABRIC (metres of a fabric product, no stitching). */
     @Column(name = "order_type", length = 10, nullable = false) private String orderType = TYPE_GARMENT;
     @Column(name = "measurement_status", length = 20) private String measurementStatus;
+    @Column(name = "stock_reduced_at") private LocalDateTime stockReducedAt;
     @Column(name = "measurement_taken_at") private LocalDateTime measurementTakenAt;
     @Column(name = "measurement_taken_by", length = 100) private String measurementTakenBy;
 
@@ -137,6 +140,10 @@ public class BoutiqueOrder {
     public void setCtwaClid(String v) { this.ctwaClid = v; }
     public String getOrderType() { return orderType; }
     public void setOrderType(String v) { this.orderType = v; }
+    public LocalDateTime getStockReducedAt() { return stockReducedAt; }
+    public void setStockReducedAt(LocalDateTime v) { this.stockReducedAt = v; }
+    /** Ready goods (fabric / readymade): no stitching, packed and dispatched from stock. */
+    public boolean isGoods() { return !TYPE_GARMENT.equals(orderType); }
     public String getMeasurementStatus() { return measurementStatus; }
     public void setMeasurementStatus(String v) { this.measurementStatus = v; }
     public LocalDateTime getMeasurementTakenAt() { return measurementTakenAt; }

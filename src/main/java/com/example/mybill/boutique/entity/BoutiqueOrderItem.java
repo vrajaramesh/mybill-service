@@ -32,7 +32,7 @@ public class BoutiqueOrderItem {
     @Column(name = "design_name", nullable = false, length = 150)
     private String designName;
 
-    @Column(name = "size_code", nullable = false, length = 10)
+    @Column(name = "size_code", nullable = false, length = 30)
     private String sizeCode;
 
     /** JSON array of {option_id, option_group, name, price_delta}. */
@@ -59,6 +59,10 @@ public class BoutiqueOrderItem {
     @Column(name = "fabric_metres", precision = 8, scale = 2) private BigDecimal fabricMetres;
     @Column(name = "fabric_unit", length = 20) private String fabricUnit;
     @Column(name = "fabric_price_per_unit", precision = 10, scale = 2) private BigDecimal fabricPricePerUnit;
+    // Goods orders (V14): GARMENT / FABRIC / READYMADE, and the collection item code (e.g. MCS-1B).
+    // For goods, fabric_product_id is the product (fabric or readymade) and fabric_price_per_unit its price.
+    @Column(name = "item_kind", length = 10) private String itemKind;
+    @Column(name = "item_code", length = 30) private String itemCode;
 
     public Integer getItemId() { return itemId; }
     public void setItemId(Integer itemId) { this.itemId = itemId; }
@@ -82,6 +86,10 @@ public class BoutiqueOrderItem {
     public void setQuantity(Integer quantity) { this.quantity = quantity; }
     public BigDecimal getLineTotal() { return lineTotal; }
     public void setLineTotal(BigDecimal lineTotal) { this.lineTotal = lineTotal; }
+    public String getItemKind() { return itemKind; }
+    public void setItemKind(String v) { this.itemKind = v; }
+    public String getItemCode() { return itemCode; }
+    public void setItemCode(String v) { this.itemCode = v; }
     public Integer getFabricProductId() { return fabricProductId; }
     public void setFabricProductId(Integer v) { this.fabricProductId = v; }
     public BigDecimal getFabricMetres() { return fabricMetres; }

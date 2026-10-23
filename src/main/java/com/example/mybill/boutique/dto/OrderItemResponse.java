@@ -11,4 +11,6 @@ import java.util.Map;
 public record OrderItemResponse(String designCode, String designName, String sizeCode, List<SelectedOptionDto> options,
                                 Map<String, Object> measurements, BigDecimal unitPrice, int qty, BigDecimal lineTotal,
                                 /** Fabric orders only: metres bought and the price per metre at order time. */
-                                BigDecimal fabricMetres, BigDecimal fabricPricePerMetre) {}
+                                BigDecimal fabricMetres, BigDecimal fabricPricePerMetre,
+                                /** GARMENT / FABRIC / READYMADE (null on older orders) and the collection item code. */
+                                String itemKind, String itemCode) {}
