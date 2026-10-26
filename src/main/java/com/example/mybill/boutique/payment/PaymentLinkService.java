@@ -308,7 +308,8 @@ public class PaymentLinkService {
             order.getOrderType(), order.isGoods() ? itemsSummary(order) : null,
             String.join(", ", java.util.stream.Stream.of(order.getDeliveryName(), order.getDeliveryAddressLine1(),
                 order.getDeliveryAddressLine2(), order.getDeliveryCity(), order.getDeliveryState() + " " + order.getDeliveryPincode())
-                .filter(v -> v != null && !v.isBlank()).toList()));
+                .filter(v -> v != null && !v.isBlank()).toList()),
+            String.valueOf(TenantContext.getCurrentTenant()));
     }
 
     /** "MCS-1B Blue check – 2.5 m; KUR-3A – size M × 2" for the staff dispatch alert. */

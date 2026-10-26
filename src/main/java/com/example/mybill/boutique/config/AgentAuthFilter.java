@@ -26,7 +26,7 @@ import java.util.Set;
  *   1. requires "Authorization: Bearer <Google ID token>" for the configured service account:
  *      Google signature, issuer accounts.google.com, audience = agent.api.audience,
  *      email = agent.allowed-sa-email and email_verified. Missing/invalid token → 401, other account → 403.
- *   2. sets the tenant to agent.tenant-schema (the agent always works for one firm; it has no app login,
+ *   2. sets the tenant to the X-Agent-Tenant header (one of agent.tenant-schemas) or agent.tenant-schema (default; it has no app login,
  *      so the per-user JWT tenant resolution does not apply) and makes sure the boutique tables exist.
  * Verification can be switched off (agent.auth.enabled=false) only with the "local" profile.
  */
@@ -35,12 +35,15 @@ import java.util.Set;
 public class AgentAuthFilter extends OncePerRequestFilter {
 
     public static final String PATH_PREFIX = "/api/agent/";
+    static final String TENANT_HEADER = "X-Agent-Tenant";
     private static final Set<String> GOOGLE_ISSUERS = Set.of("accounts.google.com", "https://accounts.google.com");
 
     @Value("${agent.auth.enabled:true}") private boolean authEnabled;
     @Value("${agent.api.audience:}") private String audience;
     @Value("${agent.allowed-sa-email:}") private String allowedEmail;
     @Value("${agent.tenant-schema:firm_srisa}") private String tenantSchema;
+    /** Firms the agent may work for; it picks one per request with the X-Agent-Tenant header (default tenantSchema). */
+    @Value("${agent.tenant-schemas:firm_srisa,firm_srihitha}") private java.util.List<String> allowedTenants;
 
     @Autowired private AgentTokenVerifier tokenVerifier;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
@@ -94,16 +97,22 @@ public class AgentAuthFilter extends OncePerRequestFilter {
             }
         }
 
+        String requested = request.getHeader(TENANT_HEADER);
+        String tenant = requested == null || requested.isBlank() ? tenantSchema : requested.trim();
+        if (!tenant.equals(tenantSchema) && !allowedTenants.contains(tenant)) {
+            write(response, HttpServletResponse.SC_FORBIDDEN, "TENANT_NOT_ALLOWED", "The agent may not work for this firm");
+            return;
+        }
         try {
-            schemaInitializer.ensureSchema(tenantSchema);
+            schemaInitializer.ensureSchema(tenant);
         } catch (Exception e) {
-            System.err.println("[AgentAuth] Tenant " + tenantSchema + " unavailable: " + e.getMessage());
+            System.err.println("[AgentAuth] Tenant " + tenant + " unavailable: " + e.getMessage());
             write(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "TENANT_UNAVAILABLE",
                 "The agent's firm is not available");
             return;
         }
 
-        TenantContext.setCurrentTenant(tenantSchema);
+        TenantContext.setCurrentTenant(tenant);
         try {
             chain.doFilter(request, response);
         } finally {

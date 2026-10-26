@@ -10,7 +10,9 @@ public record AgentEvent(String event, String orderNo, String customerPhone, Str
                          /** GARMENT, FABRIC, READYMADE or MIXED. */
                          String orderType,
                          /** Goods orders: the lines and the delivery address, for the staff dispatch alert. */
-                         String items, String deliveryAddress) {
+                         String items, String deliveryAddress,
+                         /** Firm schema the order belongs to (firm_srisa, firm_srihitha). */
+                         String tenant) {
 
     public static final String ORDER_PAID = "order.paid";
     public static final String LINK_EXPIRED = "payment_link.expired";
