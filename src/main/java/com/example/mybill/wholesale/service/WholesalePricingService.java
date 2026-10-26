@@ -67,7 +67,8 @@ public class WholesalePricingService {
      * Price for buying {@code quantity} units of the product on {@code date} (default: today in India).
      * Amounts use the same tax-exclusive GST maths as wholesale purchases.
      */
-    @Transactional(readOnly = true)
+    // "no price for this quantity" is an answer, not a failure: it must not mark a caller's read transaction rollback-only
+    @Transactional(readOnly = true, noRollbackFor = WholesaleException.class)
     public WholesalePriceQuoteResponse quote(Integer productId, BigDecimal quantity, LocalDate date, boolean interstate) {
         if (quantity == null || quantity.signum() <= 0) {
             throw WholesaleException.badRequest("Quantity must be greater than 0");
