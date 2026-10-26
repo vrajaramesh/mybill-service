@@ -19,7 +19,7 @@ public class WholesaleProductLookupService {
     /** Customer-facing product facts (never purchase rate / supplier). */
     public record ProductInfo(Integer productId, String name, String code, String type, String fabricType, String material,
                               String description, String unit, String hsnCode, BigDecimal gstPct, List<String> colors,
-                              List<String> designs, Map<String, String> specifications) {}
+                              List<String> designs, Map<String, String> specifications, String aiInstructions) {}
 
     public record Candidate(ProductInfo product, int score) {}
 
@@ -145,7 +145,8 @@ public class WholesaleProductLookupService {
     static ProductInfo info(WholesaleProduct p) {
         return new ProductInfo(p.getWholesaleProductId(), p.getProductName(), p.getProductCode(), p.getProductType(),
             p.getFabricType(), p.getMaterial(), p.getDescription(), p.getUnit(), p.getHsnCode(), p.getGstPct(),
-            list(p.getAvailableColors()), list(p.getAvailableDesigns()), specifications(p.getSpecifications()));
+            list(p.getAvailableColors()), list(p.getAvailableDesigns()), specifications(p.getSpecifications()),
+            p.getAiInstructions());
     }
 
     /** "Red, Blue; Green" → [Red, Blue, Green]. */

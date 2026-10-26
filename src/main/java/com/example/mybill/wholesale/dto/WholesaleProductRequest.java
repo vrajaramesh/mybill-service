@@ -50,5 +50,8 @@ public record WholesaleProductRequest(
     String availableDesigns,
 
     @Size(max = 4000, message = "Specifications must be at most 4000 characters")
-    String specifications
+    String specifications,
+
+    @Size(max = 4000, message = "AI instructions must be at most 4000 characters")
+    String aiInstructions
 ) {}

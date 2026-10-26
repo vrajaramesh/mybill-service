@@ -59,6 +59,10 @@ public class WholesaleProduct {
     @Column(name = "specifications")
     private String specifications;
 
+    /** The owner's instructions for the AI assistants about this product. */
+    @Column(name = "ai_instructions")
+    private String aiInstructions;
+
     /** Changed only through WholesaleProductRepository's atomic stock queries, never via entity updates. */
     @Column(name = "available_quantity", nullable = false, precision = 12, scale = 3, updatable = false)
     private BigDecimal availableQuantity = BigDecimal.ZERO;
@@ -130,6 +134,8 @@ public class WholesaleProduct {
     public void setAvailableDesigns(String availableDesigns) { this.availableDesigns = availableDesigns; }
     public String getSpecifications() { return specifications; }
     public void setSpecifications(String specifications) { this.specifications = specifications; }
+    public String getAiInstructions() { return aiInstructions; }
+    public void setAiInstructions(String aiInstructions) { this.aiInstructions = aiInstructions; }
     public void setUnit(String unit) { this.unit = unit; }
 
     public BigDecimal getAvailableQuantity() { return availableQuantity; }

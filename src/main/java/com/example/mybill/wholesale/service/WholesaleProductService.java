@@ -154,6 +154,7 @@ public class WholesaleProductService {
         product.setAvailableColors(blankToNull(r.availableColors()));
         product.setAvailableDesigns(blankToNull(r.availableDesigns()));
         product.setSpecifications(blankToNull(r.specifications()));
+        product.setAiInstructions(blankToNull(r.aiInstructions()));
     }
 
     private Map<Integer, Integer> activeRuleCounts() {
@@ -186,7 +187,8 @@ public class WholesaleProductService {
             p.getPurchaseRate(), p.getGstPct(), s != null ? s.getSupplierId() : null,
             s != null ? s.getSupplierName() : null, p.getIsActive(), p.getCreatedAt(), p.getUpdatedAt(),
             p.getImages().stream().map(WholesaleProductService::toImageResponse).toList(),
-            activePriceRuleCount, p.getFabricType(), p.getAvailableColors(), p.getAvailableDesigns(), p.getSpecifications());
+            activePriceRuleCount, p.getFabricType(), p.getAvailableColors(), p.getAvailableDesigns(), p.getSpecifications(),
+            p.getAiInstructions());
     }
 
     private static WholesaleProductImageResponse toImageResponse(WholesaleProductImage i) {

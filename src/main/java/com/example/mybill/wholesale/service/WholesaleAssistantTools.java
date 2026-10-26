@@ -195,6 +195,8 @@ public class WholesaleAssistantTools {
         if (!p.colors().isEmpty()) m.put("availableColors", p.colors());
         if (!p.designs().isEmpty()) m.put("availableDesigns", p.designs());
         if (!p.specifications().isEmpty()) m.put("specifications", p.specifications());
+        // The owner's rules for this product: follow them (they override general answers for what they cover).
+        if (p.aiInstructions() != null && !p.aiInstructions().isBlank()) m.put("ownerInstructions", p.aiInstructions());
         List<String> missing = new ArrayList<>();
         if (p.colors().isEmpty()) missing.add("colours");
         if (p.designs().isEmpty()) missing.add("designs");

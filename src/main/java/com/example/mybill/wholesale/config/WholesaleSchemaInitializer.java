@@ -45,7 +45,8 @@ public class WholesaleSchemaInitializer implements ApplicationRunner {
         "db/wholesale/V10__wholesale_inventory_ledger.sql",
         "db/wholesale/V11__wholesale_instagram_messaging.sql",
         "db/wholesale/V12__wholesale_ai_assistant.sql",
-        "db/wholesale/V13__wholesale_purchase_cancellation_repair.sql");
+        "db/wholesale/V13__wholesale_purchase_cancellation_repair.sql",
+        "db/wholesale/V14__wholesale_product_ai_instructions.sql");
 
     private final Set<String> readySchemas = ConcurrentHashMap.newKeySet();
 

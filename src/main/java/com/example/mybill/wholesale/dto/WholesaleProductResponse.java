@@ -27,5 +27,6 @@ public record WholesaleProductResponse(
     String fabricType,
     String availableColors,
     String availableDesigns,
-    String specifications
+    String specifications,
+    String aiInstructions
 ) {}
