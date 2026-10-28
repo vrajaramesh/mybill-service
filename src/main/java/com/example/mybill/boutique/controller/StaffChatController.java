@@ -102,6 +102,13 @@ public class StaffChatController {
         return agent.post("/staff/conversations/" + uuid(id) + "/keep", Map.of());
     }
 
+    /** Remove from Customer chats until the customer writes again (no AI reminders meanwhile). */
+    @PostMapping("/{id}/dismiss")
+    public JsonNode dismiss(@PathVariable String id) {
+        requireAgentFirm();
+        return agent.post("/staff/conversations/" + uuid(id) + "/dismiss", Map.of());
+    }
+
     private boolean agentFirm() {
         return agentTenant.equals(TenantContext.getCurrentTenant());
     }
