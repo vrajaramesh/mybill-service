@@ -428,13 +428,12 @@ public class AgentOrderService {
         return order;
     }
 
-    /** Contents weight of qty stitched pieces of a design; null when the design has no shipping weight. */
-    private static Integer designGrams(BoutiqueDesign design, int qty) {
-        Integer w = design.getShipWeightGrams();
-        return w == null || w <= 0 ? null : w * Math.max(qty, 1);
+    /** Contents weight of qty stitched pieces of a design (default weight when the design has none). */
+    private Integer designGrams(BoutiqueDesign design, int qty) {
+        return courierRates.weightOrDefault(design.getShipWeightGrams()) * Math.max(qty, 1);
     }
 
-    /** Contents weight of goods lines (metres / pieces x the product's weight); null if a product has no weight. */
+    /** Contents weight of goods lines (metres / pieces x the product's weight, default when unset). */
     private Integer goodsGrams(List<GoodsLineResponse> lines) {
         Map<Integer, java.math.BigDecimal> qty = new HashMap<>();
         for (GoodsLineResponse l : lines) qty.merge(l.productId(), l.quantity(), java.math.BigDecimal::add);

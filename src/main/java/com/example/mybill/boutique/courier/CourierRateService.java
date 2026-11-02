@@ -16,14 +16,15 @@ import java.util.*;
 /**
  * Delivery charge from the courier's live rate:
  *
- *   contents  = sum(weight per metre / piece x metres / pieces)      (products.ship_weight_grams, designs for stitched)
+ *   contents  = sum(weight per metre / piece x metres / pieces)      (products.ship_weight_grams, designs for stitched;
+ *                                                                     delhivery.default-weight-grams = 150 when not set)
  *   cover     = the smallest standard cover that takes the contents  (delhivery.covers)
  *   parcel    = contents + cover weight
  *   chargeable= max(parcel, volumetric = L x B x H / divisor)
  *   charge    = Delhivery prepaid cost for the pincode, rounded UP to the next delhivery.round-to (Rs 10)
  *
  * Free delivery above the threshold (PricingService) still applies. Whenever the rate can't be worked out (Delhivery not
- * set up, a product without a weight, no pincode yet, API error) the flat charge stays, so ordering never breaks.
+ * set up, no pincode yet, API error) the flat charge stays, so ordering never breaks.
  */
 @Service
 public class CourierRateService {
@@ -38,6 +39,8 @@ public class CourierRateService {
     private String coversSpec;
     @Value("${delhivery.volumetric-divisor:5000}") private int volumetricDivisor;
     @Value("${delhivery.round-to:10}") private int roundTo;
+    /** grams per metre / piece used for a product or design with no shipping weight. */
+    @Value("${delhivery.default-weight-grams:150}") private int defaultWeightGrams;
 
     public record Cover(String name, int lengthCm, int breadthCm, int heightCm, int coverGrams, int maxContentsGrams) {}
 
@@ -82,7 +85,12 @@ public class CourierRateService {
         return new ParcelPlan(contentsGrams, cover, parcel, Math.max(parcel, volumetric));
     }
 
-    /** grams per metre / piece of each product (null = not filled in). */
+    /** Weight per metre / piece, the default when not filled in. */
+    public int weightOrDefault(Integer grams) {
+        return grams == null || grams <= 0 ? defaultWeightGrams : grams;
+    }
+
+    /** grams per metre / piece of each product (absent = not filled in; see weightOrDefault). */
     public Map<Integer, Integer> productWeights(Collection<Integer> productIds) {
         Map<Integer, Integer> out = new HashMap<>();
         if (productIds == null || productIds.isEmpty()) return out;
@@ -94,17 +102,14 @@ public class CourierRateService {
         return out;
     }
 
-    /** Contents weight of goods lines (productId -> quantity in metres / pieces); null if any product has no weight. */
+    /** Contents weight of goods lines (productId -> quantity in metres / pieces); default weight for unset products. */
     public Integer contentsGrams(Map<Integer, BigDecimal> quantities) {
         Map<Integer, Integer> weights = productWeights(quantities.keySet());
         BigDecimal total = BigDecimal.ZERO;
         for (Map.Entry<Integer, BigDecimal> e : quantities.entrySet()) {
             Integer w = weights.get(e.getKey());
-            if (w == null) {
-                log.info("COURIER_WEIGHT_MISSING product={} (flat delivery charge used)", e.getKey());
-                return null;
-            }
-            total = total.add(BigDecimal.valueOf(w).multiply(e.getValue()));
+            if (w == null) log.info("COURIER_WEIGHT_DEFAULT product={} ({}g used)", e.getKey(), defaultWeightGrams);
+            total = total.add(BigDecimal.valueOf(weightOrDefault(w)).multiply(e.getValue()));
         }
         return total.setScale(0, RoundingMode.CEILING).intValue();
     }

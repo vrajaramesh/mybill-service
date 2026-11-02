@@ -213,29 +213,22 @@ public class CourierService {
 
     private record Contents(Integer grams, String missing) {}
 
-    /** Contents weight from the order lines; missing names what has no shipping weight. */
+    /** Contents weight from the order lines (default weight for a product / design without one). */
     private Contents contents(BoutiqueOrder order) {
         Set<Integer> productIds = order.getItems().stream().map(BoutiqueOrderItem::getFabricProductId)
             .filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Integer, Integer> weights = rates.productWeights(productIds);
         BigDecimal total = BigDecimal.ZERO;
-        List<String> missing = new ArrayList<>();
         for (BoutiqueOrderItem i : order.getItems()) {
             if (i.getFabricProductId() != null) {
-                Integer w = weights.get(i.getFabricProductId());
-                if (w == null) { missing.add(i.getDesignCode()); continue; }
+                int w = rates.weightOrDefault(weights.get(i.getFabricProductId()));
                 BigDecimal qty = i.getFabricMetres() != null ? i.getFabricMetres() : BigDecimal.valueOf(i.getQuantity());
                 total = total.add(BigDecimal.valueOf(w).multiply(qty));
             } else {
                 Integer w = i.getDesignId() == null ? null
                     : designRepository.findById(i.getDesignId()).map(BoutiqueDesign::getShipWeightGrams).orElse(null);
-                if (w == null || w <= 0) { missing.add(i.getDesignCode()); continue; }
-                total = total.add(BigDecimal.valueOf((long) w * i.getQuantity()));
+                total = total.add(BigDecimal.valueOf((long) rates.weightOrDefault(w) * i.getQuantity()));
             }
-        }
-        if (!missing.isEmpty()) {
-            return new Contents(null, "no shipping weight for " + String.join(", ", missing)
-                + " (set it on the product / design, or type the parcel weight)");
         }
         return new Contents(total.setScale(0, java.math.RoundingMode.CEILING).intValue(), null);
     }
