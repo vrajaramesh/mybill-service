@@ -49,6 +49,10 @@ public class BoutiqueDesign {
     @Column(name = "exact_measurements", nullable = false)
     private Boolean exactMeasurements = false;
 
+    /** Shipping weight of one stitched piece in grams (courier rates). */
+    @Column(name = "ship_weight_grams")
+    private Integer shipWeightGrams;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt;
 
@@ -81,6 +85,8 @@ public class BoutiqueDesign {
     public boolean needsExactMeasurements() { return Boolean.TRUE.equals(exactMeasurements); }
     public Boolean getExactMeasurements() { return exactMeasurements; }
     public void setExactMeasurements(Boolean v) { this.exactMeasurements = v; }
+    public Integer getShipWeightGrams() { return shipWeightGrams; }
+    public void setShipWeightGrams(Integer v) { this.shipWeightGrams = v; }
     public Boolean getIsActive() { return isActive; }
     public void setIsActive(Boolean isActive) { this.isActive = isActive; }
     public LocalDateTime getCreatedAt() { return createdAt; }

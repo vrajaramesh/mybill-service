@@ -17,4 +17,6 @@ public record OrderSummary(String orderNo, String status, String channel, Intege
                            /** GARMENT or FABRIC; fabric_metres is set for fabric orders. */
                            String orderType, BigDecimal fabricMetres,
                            /** Number of lines (goods orders can have several). */
-                           int itemCount) {}
+                           int itemCount,
+                           /** Courier shipment, null until booked. */
+                           String awb, String trackingUrl, String courierStatus, Integer shipWeightGrams) {}

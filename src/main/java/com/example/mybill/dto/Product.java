@@ -161,6 +161,13 @@ public class Product {
     public String getSizes() { return sizes; }
     public void setSizes(String sizes) { this.sizes = sizes; }
 
+    /** Shipping weight in grams per metre (fabric) or per piece (readymade), for courier rates. */
+    @Column(name = "ship_weight_grams")
+    private Integer shipWeightGrams;
+
+    public Integer getShipWeightGrams() { return shipWeightGrams; }
+    public void setShipWeightGrams(Integer shipWeightGrams) { this.shipWeightGrams = shipWeightGrams; }
+
     public LocalDateTime getCreatedAt() {
         return createdAt;
     }

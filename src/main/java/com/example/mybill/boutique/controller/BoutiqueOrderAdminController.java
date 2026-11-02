@@ -54,6 +54,51 @@ public class BoutiqueOrderAdminController {
         return orderService.markDispatched(orderNo, staffName(request));
     }
 
+    // ── Courier (Delhivery) ─────────────────────────────────────────────────
+
+    @Autowired private com.example.mybill.boutique.courier.CourierService courierService;
+
+    /** Suggested parcel (weight from the items or ?weight=grams, cover) and Delhivery's cost; nothing is booked. */
+    @GetMapping("/{orderNo}/courier/plan")
+    public com.example.mybill.boutique.courier.CourierService.Plan courierPlan(@PathVariable String orderNo,
+                                                                              @RequestParam(required = false) Integer weight,
+                                                                              @RequestParam(required = false) String cover) {
+        requireFirm();
+        return courierService.plan(orderNo, weight, cover);
+    }
+
+    /** Books the Delhivery shipment + pickup; body {weight_grams?, cover?}. The customer gets the tracking link. */
+    @PostMapping("/{orderNo}/courier")
+    public OrderResponse bookCourier(@PathVariable String orderNo, @RequestBody(required = false) Map<String, Object> body,
+                                     HttpServletRequest request) {
+        requireFirm();
+        Object w = body == null ? null : body.get("weight_grams");
+        Integer weight = w instanceof Number n && n.doubleValue() > 0 ? (int) Math.round(n.doubleValue()) : null;
+        String cover = body == null || body.get("cover") == null ? null : String.valueOf(body.get("cover"));
+        courierService.book(orderNo, weight, cover, staffName(request));
+        return orderService.get(orderNo);
+    }
+
+    @GetMapping("/{orderNo}/courier/label")
+    public Map<String, String> courierLabel(@PathVariable String orderNo) {
+        requireFirm();
+        return Map.of("url", courierService.label(orderNo));
+    }
+
+    @PostMapping("/{orderNo}/courier/cancel")
+    public OrderResponse cancelCourier(@PathVariable String orderNo, HttpServletRequest request) {
+        requireFirm();
+        courierService.cancel(orderNo, staffName(request));
+        return orderService.get(orderNo);
+    }
+
+    /** Refresh courier status of this firm's shipped orders now (also runs automatically). */
+    @PostMapping("/courier/sync")
+    public Map<String, Integer> courierSync() {
+        requireFirm();
+        return courierService.sync();
+    }
+
     @PostMapping("/{orderNo}/measurements-taken")
     public OrderResponse measurementsTaken(@PathVariable String orderNo, HttpServletRequest request) {
         requireFirm();

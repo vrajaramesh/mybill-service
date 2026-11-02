@@ -32,9 +32,10 @@ public class BoutiqueDesignController {
         String s = TenantContext.getCurrentTenant();
         if (s == null) return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
 
+        boutiqueSchemaInitializer.ensureSchema(s);   // ship_weight_grams column (V15)
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
             "SELECT design_id, code, garment_type, description, rough_price, delivery_days, " +
-            "       image_url, public_id, is_active, exact_measurements, created_at " +
+            "       image_url, public_id, is_active, exact_measurements, ship_weight_grams, created_at " +
             "FROM \"" + s + "\".boutique_designs ORDER BY garment_type, design_id");
 
         if (rows.isEmpty()) return ResponseEntity.ok(List.of());
@@ -52,6 +53,7 @@ public class BoutiqueDesignController {
             item.put("isActive",     row.get("is_active"));
             item.put("code",         row.get("code"));
             item.put("exactMeasurements", Boolean.TRUE.equals(row.get("exact_measurements")));
+            item.put("shipWeightGrams", row.get("ship_weight_grams"));
             item.put("createdAt",    row.get("created_at"));
             item.put("images",       new ArrayList<Map<String, Object>>());
             designMap.put(id, item);
@@ -120,10 +122,11 @@ public class BoutiqueDesignController {
 
         boutiqueSchemaInitializer.ensureSchema(s);   // exact_measurements column (V9)
         boolean exact = Boolean.TRUE.equals(body.get("exactMeasurements"));
+        Integer weight = grams(body.get("shipWeightGrams"));
         List<Integer> generatedIds = jdbcTemplate.queryForList(
-            "INSERT INTO \"" + s + "\".boutique_designs (garment_type, description, rough_price, delivery_days, exact_measurements) " +
-            "VALUES (?, ?, ?, ?, ?) RETURNING design_id",
-            Integer.class, garmentType, description, roughPrice, deliveryDays, exact);
+            "INSERT INTO \"" + s + "\".boutique_designs (garment_type, description, rough_price, delivery_days, exact_measurements, ship_weight_grams) " +
+            "VALUES (?, ?, ?, ?, ?, ?) RETURNING design_id",
+            Integer.class, garmentType, description, roughPrice, deliveryDays, exact, weight);
 
         if (generatedIds.isEmpty()) return ResponseEntity.internalServerError().build();
         int designId = generatedIds.get(0);
@@ -154,12 +157,13 @@ public class BoutiqueDesignController {
         Integer deliveryDays = body.get("deliveryDays")  != null ? ((Number) body.get("deliveryDays")).intValue()     : null;
         Boolean isActive     = body.get("isActive") instanceof Boolean b ? b : true;
         boolean exact        = Boolean.TRUE.equals(body.get("exactMeasurements"));
+        Integer weight       = grams(body.get("shipWeightGrams"));
 
-        boutiqueSchemaInitializer.ensureSchema(s);   // exact_measurements column (V9)
+        boutiqueSchemaInitializer.ensureSchema(s);   // exact_measurements (V9), ship_weight_grams (V15)
         jdbcTemplate.update(
             "UPDATE \"" + s + "\".boutique_designs SET garment_type = ?, description = ?, rough_price = ?, " +
-            "delivery_days = ?, is_active = ?, exact_measurements = ?, updated_at = NOW() WHERE design_id = ?",
-            garmentType, description, roughPrice, deliveryDays, isActive, exact, id);
+            "delivery_days = ?, is_active = ?, exact_measurements = ?, ship_weight_grams = ?, updated_at = NOW() WHERE design_id = ?",
+            garmentType, description, roughPrice, deliveryDays, isActive, exact, weight, id);
 
         return ResponseEntity.ok(Map.of("updated", true));
     }
@@ -285,5 +289,12 @@ public class BoutiqueDesignController {
         String sql = "SELECT EXISTS (SELECT 1 FROM information_schema.tables " +
                      "WHERE table_schema = ? AND table_name = ?)";
         return Boolean.TRUE.equals(jdbcTemplate.queryForObject(sql, Boolean.class, schema, table));
+    }
+
+    /** Shipping weight in grams from the form: a positive whole number, or null when left empty. */
+    private static Integer grams(Object value) {
+        if (!(value instanceof Number n)) return null;
+        int g = (int) Math.round(n.doubleValue());
+        return g > 0 ? g : null;
     }
 }

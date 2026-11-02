@@ -26,6 +26,9 @@ public interface BoutiqueOrderRepository extends JpaRepository<BoutiqueOrder, In
     /** Paid goods (fabric / readymade) orders waiting to be dispatched, oldest payment first. */
     List<BoutiqueOrder> findByStatusAndOrderTypeNotOrderByPaidAtAscOrderIdAsc(BoutiqueOrderStatus status, String orderType, Pageable page);
 
+    /** Shipped orders still on their way (courier tracking sync). */
+    List<BoutiqueOrder> findByStatusAndAwbIsNotNullOrderByShippedAtAsc(BoutiqueOrderStatus status);
+
     long countByStatusAndOrderTypeNot(BoutiqueOrderStatus status, String orderType);
 
     long countByMeasurementStatus(String measurementStatus);

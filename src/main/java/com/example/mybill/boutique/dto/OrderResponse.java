@@ -31,5 +31,16 @@ public record OrderResponse(
     String measurementTakenBy,
     LocalDateTime createdAt,
     /** GARMENT or FABRIC. */
-    String orderType
+    String orderType,
+    /** Courier shipment (null until booked): DELHIVERY, the AWB / tracking number, a public tracking link. */
+    String courier,
+    String awb,
+    String trackingUrl,
+    String courierStatus,
+    String courierLocation,
+    LocalDateTime courierStatusAt,
+    LocalDateTime shippedAt,
+    LocalDateTime deliveredAt,
+    /** Parcel weight (contents + cover) the delivery charge was quoted on. */
+    Integer shipWeightGrams
 ) {}

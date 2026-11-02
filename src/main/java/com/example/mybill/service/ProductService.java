@@ -88,6 +88,7 @@ public class ProductService {
             product.setSuitableFor(productDetails.getSuitableFor());
             product.setTags(productDetails.getTags());
             product.setSizes(productDetails.getSizes());
+            product.setShipWeightGrams(productDetails.getShipWeightGrams());
             product.setUpdatedAt(LocalDateTime.now());
             Product saved = productRepository.save(product);
             triggerHermesAsync(saved.getProductId());

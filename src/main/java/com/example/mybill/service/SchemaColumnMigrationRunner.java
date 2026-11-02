@@ -49,6 +49,12 @@ public class SchemaColumnMigrationRunner implements ApplicationRunner {
                 System.err.println("[Migration] Could not add is_online column for schema " + s + ": " + e.getMessage());
             }
             try {
+                // grams per metre (fabric) / per piece (readymade): parcel weight for courier rates (Delhivery)
+                jdbcTemplate.execute("ALTER TABLE \"" + s + "\".products ADD COLUMN IF NOT EXISTS ship_weight_grams INTEGER");
+            } catch (Exception e) {
+                System.err.println("[Migration] Could not add ship_weight_grams column for schema " + s + ": " + e.getMessage());
+            }
+            try {
                 jdbcTemplate.execute(
                     "DO $$ BEGIN " +
                     "  IF EXISTS (SELECT 1 FROM information_schema.tables " +

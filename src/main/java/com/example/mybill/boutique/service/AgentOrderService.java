@@ -38,6 +38,7 @@ public class AgentOrderService {
     @Autowired private BoutiqueCustomerRepository customerRepository;
     @Autowired private FabricCatalogService fabricCatalog;
     @Autowired private GoodsService goodsService;
+    @Autowired private com.example.mybill.boutique.courier.CourierRateService courierRates;
     /** Days to cut and pack a fabric order before it ships. */
     @org.springframework.beans.factory.annotation.Value("${boutique.fabric.dispatch-days:1}")
     private int fabricDispatchDays;
@@ -58,12 +59,13 @@ public class AgentOrderService {
     /** Price breakdown for a design + size + options; nothing is saved. */
     @Transactional(readOnly = true)
     public QuoteResponse quote(QuoteRequest request) {
-        Priced p = price(request.designCode(), request.sizeCode(), request.optionIds(),
-            request.qty() == null ? 1 : request.qty());
+        int qty = request.qty() == null ? 1 : request.qty();
+        Priced p = price(request.designCode(), request.sizeCode(), request.optionIds(), qty);
         ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(),
             leadTime(p.design()), LocalDate.now(IST));
+        PriceBreakdown b = courierRates.rate(p.breakdown(), request.pincode(), designGrams(p.design(), qty)).breakdown();
         return new QuoteResponse(p.design().getCode(), p.design().displayName(), p.sizeCode(),
-            p.design().getLeadTimeDays(), p.breakdown(), ship.serviceable(), ship.transitDays(),
+            p.design().getLeadTimeDays(), b, ship.serviceable(), ship.transitDays(),
             ship.estimatedDeliveryDate());
     }
 
@@ -82,7 +84,9 @@ public class AgentOrderService {
                 Map.of("customer_id", request.customerId()));
         }
         Priced p = price(request.designCode(), request.sizeCode(), request.optionIds(), request.qty());
-        PriceBreakdown b = p.breakdown();
+        com.example.mybill.boutique.courier.CourierRateService.Rated rated = courierRates.rate(p.breakdown(),
+            request.delivery().pincode(), designGrams(p.design(), request.qty()));
+        PriceBreakdown b = rated.breakdown();
         LocalDateTime now = LocalDateTime.now();
         ShippingService.ShippingEstimate ship = shippingService.estimate(request.delivery().pincode(),
             leadTime(p.design()), LocalDate.now(IST));
@@ -116,6 +120,7 @@ public class AgentOrderService {
         order.setCtwaClid(request.ctwaClid() == null || request.ctwaClid().isBlank() ? null : request.ctwaClid().trim());
         order.setCreatedAt(now);
         order.setUpdatedAt(now);
+        if (rated.plan() != null) order.setShipWeightGrams(rated.plan().parcelGrams());
 
         BoutiqueOrderItem item = new BoutiqueOrderItem();
         item.setDesignId(p.design().getDesignId());
@@ -138,7 +143,8 @@ public class AgentOrderService {
     @Transactional(readOnly = true)
     public FabricQuoteResponse fabricQuote(FabricQuoteRequest request) {
         FabricResponse fabric = fabricCatalog.require(request.productId());
-        PriceBreakdown b = pricingService.priceFabric(fabric, request.metres());
+        PriceBreakdown b = courierRates.rate(pricingService.priceFabric(fabric, request.metres()), request.pincode(),
+            courierRates.contentsGrams(Map.of(fabric.productId(), request.metres()))).breakdown();
         ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(), fabricDispatchDays,
             LocalDate.now(IST));
         return new FabricQuoteResponse(fabric.productId(), fabric.code(), fabric.name(), request.metres(),
@@ -156,7 +162,10 @@ public class AgentOrderService {
                 Map.of("customer_id", request.customerId()));
         }
         FabricResponse fabric = fabricCatalog.require(request.productId());
-        PriceBreakdown b = pricingService.priceFabric(fabric, request.metres());
+        com.example.mybill.boutique.courier.CourierRateService.Rated rated = courierRates.rate(
+            pricingService.priceFabric(fabric, request.metres()), request.delivery().pincode(),
+            courierRates.contentsGrams(Map.of(fabric.productId(), request.metres())));
+        PriceBreakdown b = rated.breakdown();
         ShippingService.ShippingEstimate ship = shippingService.estimate(request.delivery().pincode(),
             fabricDispatchDays, LocalDate.now(IST));
         if (!ship.serviceable()) {
@@ -167,6 +176,7 @@ public class AgentOrderService {
         BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), b, request.channel(),
             request.idempotencyKey(), ship, request.sourceType(), request.sourceId(), request.ctwaClid());
         order.setOrderType(BoutiqueOrder.TYPE_FABRIC);
+        if (rated.plan() != null) order.setShipWeightGrams(rated.plan().parcelGrams());
 
         BoutiqueOrderItem item = new BoutiqueOrderItem();
         item.setDesignCode(fabric.code());
@@ -190,7 +200,8 @@ public class AgentOrderService {
     public GoodsQuoteResponse goodsQuote(GoodsQuoteRequest request) {
         GoodsService.Priced p = goodsService.price(request.lines());
         ShippingService.ShippingEstimate ship = shippingService.estimate(request.pincode(), fabricDispatchDays, LocalDate.now(IST));
-        return new GoodsQuoteResponse(p.lines(), p.breakdown(), p.orderType(), ship.serviceable(), ship.transitDays(),
+        PriceBreakdown b = courierRates.rate(p.breakdown(), request.pincode(), goodsGrams(p.lines())).breakdown();
+        return new GoodsQuoteResponse(p.lines(), b, p.orderType(), ship.serviceable(), ship.transitDays(),
             ship.estimatedDeliveryDate());
     }
 
@@ -210,9 +221,12 @@ public class AgentOrderService {
             throw AgentApiException.unprocessable("PINCODE_NOT_SERVICEABLE", "We cannot deliver to this pincode yet",
                 Map.of("pincode", request.delivery().pincode(), "reason", String.valueOf(ship.reason())));
         }
-        BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), p.breakdown(), request.channel(),
+        com.example.mybill.boutique.courier.CourierRateService.Rated rated = courierRates.rate(p.breakdown(),
+            request.delivery().pincode(), goodsGrams(p.lines()));
+        BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), rated.breakdown(), request.channel(),
             request.idempotencyKey(), ship, request.sourceType(), request.sourceId(), request.ctwaClid());
         order.setOrderType(p.orderType());
+        if (rated.plan() != null) order.setShipWeightGrams(rated.plan().parcelGrams());
         for (GoodsLineResponse l : p.lines()) {
             boolean fabric = GoodsService.FABRIC.equals(l.kind());
             BoutiqueOrderItem item = new BoutiqueOrderItem();
@@ -379,7 +393,9 @@ public class AgentOrderService {
                 o.getTotal(), PricingService.CURRENCY, o.getEstimatedDeliveryDate(),
                 pay == null ? null : pay.getStatus(), o.getPaidAt(), pay == null ? null : pay.getRazorpayPaymentId(),
                 o.getMeasurementStatus(), o.getCreatedAt(), o.getOrderType(),
-                first == null ? null : first.getFabricMetres(), o.getItems().size());
+                first == null ? null : first.getFabricMetres(), o.getItems().size(),
+                o.getAwb(), com.example.mybill.boutique.courier.DelhiveryClient.trackingUrl(o.getAwb()),
+                o.getCourierStatus(), o.getShipWeightGrams());
         }).toList();
     }
 
@@ -410,6 +426,19 @@ public class AgentOrderService {
                 "This idempotency_key was already used for a different customer");
         }
         return order;
+    }
+
+    /** Contents weight of qty stitched pieces of a design; null when the design has no shipping weight. */
+    private static Integer designGrams(BoutiqueDesign design, int qty) {
+        Integer w = design.getShipWeightGrams();
+        return w == null || w <= 0 ? null : w * Math.max(qty, 1);
+    }
+
+    /** Contents weight of goods lines (metres / pieces x the product's weight); null if a product has no weight. */
+    private Integer goodsGrams(List<GoodsLineResponse> lines) {
+        Map<Integer, java.math.BigDecimal> qty = new HashMap<>();
+        for (GoodsLineResponse l : lines) qty.merge(l.productId(), l.quantity(), java.math.BigDecimal::add);
+        return courierRates.contentsGrams(qty);
     }
 
     private static int leadTime(BoutiqueDesign design) {
@@ -463,7 +492,9 @@ public class AgentOrderService {
                 .map(p -> paymentLinkService.toInfo(o, p)).orElse(null),
             o.getSourceType(), o.getSourceId(), o.getCtwaClid(),
             o.getMeasurementStatus(), o.getMeasurementTakenAt(), o.getMeasurementTakenBy(),
-            o.getCreatedAt(), o.getOrderType());
+            o.getCreatedAt(), o.getOrderType(), o.getCourier(), o.getAwb(),
+            com.example.mybill.boutique.courier.DelhiveryClient.trackingUrl(o.getAwb()), o.getCourierStatus(),
+            o.getCourierLocation(), o.getCourierStatusAt(), o.getShippedAt(), o.getDeliveredAt(), o.getShipWeightGrams());
     }
 
     private String toJson(Object value) {

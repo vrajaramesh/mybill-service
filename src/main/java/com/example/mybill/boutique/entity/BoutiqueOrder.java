@@ -78,6 +78,43 @@ public class BoutiqueOrder {
     @Column(name = "measurement_taken_at") private LocalDateTime measurementTakenAt;
     @Column(name = "measurement_taken_by", length = 100) private String measurementTakenBy;
 
+    /** Courier (V15): parcel weight the delivery charge was quoted on, and the shipment booked for the order. */
+    @Column(name = "ship_weight_grams") private Integer shipWeightGrams;
+    @Column(name = "courier", length = 20) private String courier;
+    @Column(name = "awb", length = 40) private String awb;
+    @Column(name = "courier_status", length = 60) private String courierStatus;
+    @Column(name = "courier_location", length = 150) private String courierLocation;
+    @Column(name = "courier_status_at") private LocalDateTime courierStatusAt;
+    @Column(name = "courier_pickup_id", length = 40) private String courierPickupId;
+    @Column(name = "courier_cost", precision = 10, scale = 2) private BigDecimal courierCost;
+    /** Last courier status the customer was told about (so each update is messaged once). */
+    @Column(name = "courier_notified", length = 60) private String courierNotified;
+    @Column(name = "shipped_at") private LocalDateTime shippedAt;
+    @Column(name = "delivered_at") private LocalDateTime deliveredAt;
+
+    public Integer getShipWeightGrams() { return shipWeightGrams; }
+    public void setShipWeightGrams(Integer v) { this.shipWeightGrams = v; }
+    public String getCourier() { return courier; }
+    public void setCourier(String v) { this.courier = v; }
+    public String getAwb() { return awb; }
+    public void setAwb(String v) { this.awb = v; }
+    public String getCourierStatus() { return courierStatus; }
+    public void setCourierStatus(String v) { this.courierStatus = v; }
+    public String getCourierLocation() { return courierLocation; }
+    public void setCourierLocation(String v) { this.courierLocation = v; }
+    public LocalDateTime getCourierStatusAt() { return courierStatusAt; }
+    public void setCourierStatusAt(LocalDateTime v) { this.courierStatusAt = v; }
+    public String getCourierPickupId() { return courierPickupId; }
+    public void setCourierPickupId(String v) { this.courierPickupId = v; }
+    public BigDecimal getCourierCost() { return courierCost; }
+    public void setCourierCost(BigDecimal v) { this.courierCost = v; }
+    public String getCourierNotified() { return courierNotified; }
+    public void setCourierNotified(String v) { this.courierNotified = v; }
+    public LocalDateTime getShippedAt() { return shippedAt; }
+    public void setShippedAt(LocalDateTime v) { this.shippedAt = v; }
+    public LocalDateTime getDeliveredAt() { return deliveredAt; }
+    public void setDeliveredAt(LocalDateTime v) { this.deliveredAt = v; }
+
     @Column(name = "stitching_order_id")
     private Integer stitchingOrderId;
 

@@ -194,6 +194,7 @@ public class FirmService {
                 sub_category_id INTEGER        REFERENCES product_sub_category(id) ON DELETE SET NULL,
                 is_active       BOOLEAN        NOT NULL DEFAULT TRUE,
                 is_online       BOOLEAN        NOT NULL DEFAULT TRUE,
+                ship_weight_grams INTEGER,
                 created_at      TIMESTAMP,
                 updated_at      TIMESTAMP
             )""");

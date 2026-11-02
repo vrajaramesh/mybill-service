@@ -15,6 +15,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
+import com.example.mybill.boutique.exception.AgentApiException;
 
 /**
  * Internal API for the srisa-agent service. Authenticated by AgentAuthFilter (Google ID token of the agent's
@@ -24,6 +26,7 @@ import java.util.List;
 @RequestMapping("/api/agent")
 public class AgentController {
 
+    @Autowired private com.example.mybill.boutique.courier.CourierService courierService;
     @Autowired private AgentCatalogService catalogService;
     @Autowired private AgentCustomerService customerService;
     @Autowired private AgentOrderService orderService;
@@ -178,6 +181,19 @@ public class AgentController {
     @GetMapping("/orders/{orderNo}/payment")
     public PaymentInfo payment(@PathVariable String orderNo) {
         return paymentLinkService.latestPayment(orderNo);
+    }
+
+    /** Live courier status of a shipped order (404 COURIER_NOT_BOOKED until the courier is booked). */
+    @GetMapping("/orders/{orderNo}/tracking")
+    public Map<String, Object> tracking(@PathVariable String orderNo) {
+        return courierService.tracking(orderNo).orElseThrow(() ->
+            AgentApiException.notFound("COURIER_NOT_BOOKED", "Order " + orderNo + " has not been shipped yet"));
+    }
+
+    /** Courier status sync for the agent's firm (called by srisa-agent's scheduled job). */
+    @PostMapping("/courier/sync")
+    public Map<String, Integer> courierSync() {
+        return courierService.sync();
     }
 
     @GetMapping("/orders/{orderNo}")
