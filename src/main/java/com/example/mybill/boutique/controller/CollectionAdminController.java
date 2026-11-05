@@ -31,7 +31,7 @@ public class CollectionAdminController {
     @GetMapping("/{id}")
     public Map<String, Object> get(@PathVariable int id) {
         requireFirm();
-        return collections.get(String.valueOf(id));
+        return collections.get(String.valueOf(id), true);
     }
 
     @PostMapping

@@ -99,6 +99,52 @@ public class BoutiqueOrderAdminController {
         return courierService.sync();
     }
 
+    /** Shipped with another courier (e.g. the dropship supplier's); body {courier, awb, tracking_url?}. The customer is told. */
+    @PostMapping("/{orderNo}/shipment")
+    public OrderResponse shipManually(@PathVariable String orderNo, @RequestBody Map<String, Object> body, HttpServletRequest request) {
+        requireFirm();
+        courierService.shipManually(orderNo, str(body.get("courier")), str(body.get("awb")), str(body.get("tracking_url")),
+            staffName(request));
+        return orderService.get(orderNo);
+    }
+
+    /** Delivered (couriers that aren't tracked automatically); the customer gets the "delivered" message. */
+    @PostMapping("/{orderNo}/delivered")
+    public OrderResponse delivered(@PathVariable String orderNo, HttpServletRequest request) {
+        requireFirm();
+        courierService.markDelivered(orderNo, staffName(request));
+        return orderService.get(orderNo);
+    }
+
+    // ── Dropship: send the order to the supplier, pay them ──────────────────
+
+    @Autowired private com.example.mybill.boutique.service.DropshipService dropshipService;
+
+    /** Supplier, amount we owe (cost + courier), margin, and the WhatsApp message / wa.me link for the supplier. */
+    @GetMapping("/{orderNo}/supplier")
+    public Map<String, Object> supplier(@PathVariable String orderNo) {
+        requireFirm();
+        return dropshipService.orderView(orderNo);
+    }
+
+    @PostMapping("/{orderNo}/supplier/sent")
+    public Map<String, Object> supplierSent(@PathVariable String orderNo, HttpServletRequest request) {
+        requireFirm();
+        return dropshipService.markSent(orderNo, staffName(request));
+    }
+
+    /** Body {reference}: the UPI / bank reference of the payment to the supplier. */
+    @PostMapping("/{orderNo}/supplier/paid")
+    public Map<String, Object> supplierPaid(@PathVariable String orderNo, @RequestBody(required = false) Map<String, Object> body,
+                                            HttpServletRequest request) {
+        requireFirm();
+        return dropshipService.markPaid(orderNo, body == null ? null : str(body.get("reference")), staffName(request));
+    }
+
+    private static String str(Object o) {
+        return o == null ? null : o.toString();
+    }
+
     @PostMapping("/{orderNo}/measurements-taken")
     public OrderResponse measurementsTaken(@PathVariable String orderNo, HttpServletRequest request) {
         requireFirm();

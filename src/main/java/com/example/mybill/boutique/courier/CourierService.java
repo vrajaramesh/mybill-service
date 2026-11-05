@@ -25,6 +25,8 @@ import java.util.stream.Collectors;
  *   label  -> the shipping label PDF to print
  *   cancel -> only before pickup; the order goes back to PAID
  *   sync   -> courier status of shipped orders; "out for delivery" and "delivered" are messaged once, DELIVERED set
+ *   shipManually / markDelivered -> a parcel sent with another courier (e.g. the dropship supplier's): staff type the
+ *            courier, tracking number and link; the customer gets the same WhatsApp updates. A Delhivery AWB is synced.
  */
 @Service
 public class CourierService {
@@ -34,6 +36,8 @@ public class CourierService {
     public static final String DELHIVERY = "DELHIVERY";
     public static final String DISPATCHED = "order.dispatched", OUT_FOR_DELIVERY = "order.out_for_delivery",
         DELIVERED = "order.delivered";
+    /** courier_pickup_id of a shipment staff typed in (not booked by us, nothing to cancel at the courier). */
+    static final String MANUAL = "MANUAL";
 
     @Autowired private DelhiveryClient delhivery;
     @Autowired private CourierRateService rates;
@@ -108,10 +112,72 @@ public class CourierService {
         return saved;
     }
 
+    /** Shipped with another courier (the supplier's, or ours by hand): the tracking number goes to the customer. */
+    @Transactional
+    public BoutiqueOrder shipManually(String orderNo, String courier, String awb, String trackingUrl, String staff) {
+        BoutiqueOrder order = find(orderNo);
+        String c = courier == null ? "" : courier.trim();
+        String a = awb == null ? "" : awb.trim();
+        String url = trackingUrl == null ? "" : trackingUrl.trim();
+        if (c.isEmpty()) throw AgentApiException.unprocessable("COURIER_REQUIRED", "Enter the courier name", Map.of());
+        if (a.isEmpty()) throw AgentApiException.unprocessable("AWB_REQUIRED", "Enter the tracking number", Map.of());
+        if (!url.isEmpty() && !url.matches("(?i)https?://\\S+")) {
+            throw AgentApiException.unprocessable("INVALID_TRACKING_URL", "The tracking link must start with http:// or https://", Map.of());
+        }
+        if (order.getStatus() == BoutiqueOrderStatus.DISPATCHED && order.getAwb() != null) {
+            throw AgentApiException.conflict("COURIER_ALREADY_BOOKED", "Already shipped (" + order.getCourier() + " " + order.getAwb()
+                + ") - cancel / clear it first");
+        }
+        if (order.getStatus() != BoutiqueOrderStatus.PAID && order.getStatus() != BoutiqueOrderStatus.IN_STITCHING
+                && order.getStatus() != BoutiqueOrderStatus.DISPATCHED) {
+            throw AgentApiException.conflict("ORDER_NOT_DISPATCHABLE", "Only paid orders can be shipped (this one is "
+                + order.getStatus() + ")");
+        }
+        boolean delhivery = c.equalsIgnoreCase("delhivery");
+        LocalDateTime now = LocalDateTime.now();
+        order.setCourier(delhivery ? DELHIVERY : trim(c, 40));
+        order.setAwb(trim(a, 40));
+        order.setCourierTrackingUrl(url.isEmpty() ? null : trim(url, 500));
+        order.setCourierPickupId(MANUAL);
+        order.setCourierStatus("Shipped");
+        order.setCourierStatusAt(now);
+        order.setShippedAt(now);
+        order.setCourierNotified("dispatched");
+        order.setStatus(BoutiqueOrderStatus.DISPATCHED);
+        order.setUpdatedAt(now);
+        BoutiqueOrder saved = orderRepository.save(order);
+        log.info("COURIER_MANUAL order={} courier={} awb={} by={}", saved.getOrderNo(), saved.getCourier(), saved.getAwb(), staff);
+        events.publishEvent(event(DISPATCHED, saved, null));
+        return saved;
+    }
+
+    /** Delivered (for couriers we can't track automatically); the customer gets the "delivered" message once. */
+    @Transactional
+    public BoutiqueOrder markDelivered(String orderNo, String staff) {
+        BoutiqueOrder order = find(orderNo);
+        if (order.getStatus() == BoutiqueOrderStatus.DELIVERED) return order;
+        if (order.getStatus() != BoutiqueOrderStatus.DISPATCHED) {
+            throw AgentApiException.conflict("ORDER_NOT_DISPATCHED", "Only shipped orders can be marked delivered (this one is "
+                + order.getStatus() + ")");
+        }
+        order.setStatus(BoutiqueOrderStatus.DELIVERED);
+        order.setDeliveredAt(LocalDateTime.now());
+        order.setCourierStatus("Delivered");
+        order.setCourierStatusAt(LocalDateTime.now());
+        order.setUpdatedAt(LocalDateTime.now());
+        if (order.getAwb() != null && !"delivered".equals(order.getCourierNotified())) {
+            order.setCourierNotified("delivered");
+            events.publishEvent(event(DELIVERED, order, null));
+        }
+        log.info("ORDER_DELIVERED order={} by={}", order.getOrderNo(), staff);
+        return orderRepository.save(order);
+    }
+
     @Transactional(readOnly = true)
     public String label(String orderNo) {
         BoutiqueOrder order = find(orderNo);
         if (order.getAwb() == null) throw AgentApiException.conflict("COURIER_NOT_BOOKED", "No courier booked for " + orderNo);
+        if (!order.isDelhivery()) throw AgentApiException.conflict("NOT_DELHIVERY", "The label comes from " + order.getCourier());
         try {
             return delhivery.labelUrl(order.getAwb()).orElseThrow(() ->
                 AgentApiException.unprocessable("COURIER_ERROR", "Delhivery has no label for AWB " + order.getAwb() + " yet", Map.of()));
@@ -120,7 +186,7 @@ public class CourierService {
         }
     }
 
-    /** Before pickup only: cancels the Delhivery shipment and puts the order back to PAID. */
+    /** Before pickup only: cancels the Delhivery shipment we booked (or clears a typed-in tracking number); back to PAID. */
     @Transactional
     public BoutiqueOrder cancel(String orderNo, String staff) {
         BoutiqueOrder order = find(orderNo);
@@ -128,10 +194,12 @@ public class CourierService {
         if (order.getStatus() == BoutiqueOrderStatus.DELIVERED) {
             throw AgentApiException.conflict("COURIER_DELIVERED", "Already delivered, can't cancel");
         }
-        try {
-            delhivery.cancel(order.getAwb());
-        } catch (CourierException e) {
-            throw AgentApiException.unprocessable("COURIER_ERROR", e.getMessage(), Map.of());
+        if (order.isDelhivery() && !MANUAL.equals(order.getCourierPickupId())) {
+            try {
+                delhivery.cancel(order.getAwb());   // booked by us: cancel it at Delhivery too
+            } catch (CourierException e) {
+                throw AgentApiException.unprocessable("COURIER_ERROR", e.getMessage(), Map.of());
+            }
         }
         log.info("COURIER_CANCELLED order={} awb={} by={}", order.getOrderNo(), order.getAwb(), staff);
         order.setAwb(null);
@@ -141,6 +209,7 @@ public class CourierService {
         order.setCourierLocation(null);
         order.setCourierStatusAt(null);
         order.setCourierNotified(null);
+        order.setCourierTrackingUrl(null);
         order.setShippedAt(null);
         order.setStatus(order.getStitchingOrderId() != null && !order.isGoods() ? BoutiqueOrderStatus.IN_STITCHING
             : BoutiqueOrderStatus.PAID);
@@ -156,9 +225,9 @@ public class CourierService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("courier", order.getCourier());
         out.put("awb", order.getAwb());
-        out.put("tracking_url", DelhiveryClient.trackingUrl(order.getAwb()));
+        out.put("tracking_url", order.trackingUrl());
         out.put("shipped_at", order.getShippedAt());
-        delhivery.track(order.getAwb()).ifPresentOrElse(t -> {
+        (order.isDelhivery() ? delhivery.track(order.getAwb()) : Optional.<DelhiveryClient.Tracking>empty()).ifPresentOrElse(t -> {
             out.put("status", t.status());
             out.put("location", t.location());
             out.put("details", t.instructions());
@@ -179,6 +248,7 @@ public class CourierService {
         Map<String, Integer> stats = new LinkedHashMap<>(Map.of("checked", 0, "updated", 0, "out_for_delivery", 0, "delivered", 0));
         if (!delhivery.enabled()) return stats;
         for (BoutiqueOrder order : orderRepository.findByStatusAndAwbIsNotNullOrderByShippedAtAsc(BoutiqueOrderStatus.DISPATCHED)) {
+            if (!order.isDelhivery()) continue;            // another courier: staff mark it delivered
             Optional<DelhiveryClient.Tracking> t = delhivery.track(order.getAwb());
             stats.merge("checked", 1, Integer::sum);
             if (t.isEmpty()) continue;
@@ -271,7 +341,7 @@ public class CourierService {
         BoutiqueCustomer c = customerRepository.findById(order.getCustomerId()).orElse(null);
         String phone = c != null && c.getPhoneE164() != null ? c.getPhoneE164() : order.getDeliveryPhone();
         return new CourierEvent(type, order.getOrderNo(), phone, c != null ? c.getCustomerName() : order.getDeliveryName(),
-            order.getOrderType(), order.getCourier(), order.getAwb(), DelhiveryClient.trackingUrl(order.getAwb()), location,
+            order.getOrderType(), order.getCourier(), order.getAwb(), order.trackingUrl(), location,
             type + ":" + order.getOrderNo() + ":" + order.getAwb(), String.valueOf(TenantContext.getCurrentTenant()));
     }
 }

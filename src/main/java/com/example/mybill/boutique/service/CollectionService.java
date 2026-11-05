@@ -17,17 +17,20 @@ import java.util.*;
  * printed on its photo (e.g. MCS-1A). Price, stock, sizes and photos always come from Products.
  * Used by the mybill-ui Collections page and, read-only, by the WhatsApp assistant (/api/agent/collections).
  * JSON keys are snake_case for both.
+ * DROPSHIP collections (V16) are a supplier's products: readymade-like (pieces, sizes) but the supplier holds the stock,
+ * and they carry the supplier and its courier charges per zone. The supplier and cost prices are only in the staff view.
  */
 @Service
 public class CollectionService {
 
-    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE";
+    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP";
     static final Set<String> METRE_UNITS = Set.of("m", "meter", "meters", "metre", "metres", "mts", "mtr", "mtrs");
     static final Set<String> PIECE_UNITS = Set.of("pcs", "pc", "piece", "pieces", "nos", "no");
     static final int MAX_ITEMS = 60;
     private static final String CODE = "^[A-Z0-9][A-Z0-9-]{1,29}$";
 
     @PersistenceContext private EntityManager em;
+    @org.springframework.beans.factory.annotation.Autowired private DropshipService dropship;
 
     public static boolean isMetres(String unit) {
         return unit != null && METRE_UNITS.contains(unit.trim().toLowerCase(Locale.ROOT));
@@ -60,9 +63,15 @@ public class CollectionService {
         return out;
     }
 
-    /** A collection with its items (product name, unit, price, stock, sizes, photo, instructions). */
+    /** The assistant's view: a collection with its items (product name, unit, price, stock, sizes, photo, instructions). */
     @Transactional(readOnly = true)
     public Map<String, Object> get(String codeOrId) {
+        return get(codeOrId, false);
+    }
+
+    /** staff = mybill-ui: also the supplier, courier charges and cost prices of a dropship collection. */
+    @Transactional(readOnly = true)
+    public Map<String, Object> get(String codeOrId, boolean staff) {
         Object[] c = header(codeOrId);
         int id = ((Number) c[0]).intValue();
         Map<String, Object> out = new LinkedHashMap<>();
@@ -75,8 +84,25 @@ public class CollectionService {
         out.put("ai_instructions", c[6]);
         out.put("active", c[7]);
         List<Map<String, Object>> items = items(id);
+        boolean isDropship = DROPSHIP.equals(c[3]);
+        Optional<DropshipService.Supplier> supplier = isDropship ? dropship.supplier(c[8] == null ? null : ((Number) c[8]).intValue())
+            : Optional.empty();
+        DropshipService.Slabs slabs = dropship.parseSlabs((String) c[9], c[10] == null ? null : new BigDecimal(c[10].toString()));
+        if (isDropship) {
+            out.put("dropship", true);
+            out.put("dispatch_days", supplier.map(DropshipService.Supplier::dispatchDays).orElse(null));
+        }
+        if (staff) {
+            out.put("supplier_id", c[8]);
+            out.put("supplier_name", supplier.map(DropshipService.Supplier::name).orElse(null));
+            out.put("courier_slabs", slabs.perZone());
+            out.put("courier_extra_per_piece", c[10]);
+        } else {
+            items.forEach(i -> i.remove("cost_price"));
+        }
         out.put("items", items);
-        out.put("warnings", warnings((String) c[3], items));
+        out.put("warnings", warnings((String) c[3], items, supplier, slabs, isDropship && c[8] != null));
+        if (!staff) out.remove("warnings");
         return out;
     }
 
@@ -99,7 +125,8 @@ public class CollectionService {
     private Object[] header(String codeOrId) {
         boolean numeric = codeOrId.matches("\\d{1,9}");
         List<?> rows = em.createNativeQuery("""
-                SELECT collection_id, code, name, collection_type, description, cover_image_url, ai_instructions, is_active
+                SELECT collection_id, code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
+                       supplier_id, courier_slabs, courier_extra_per_piece
                   FROM boutique_collections""" + (numeric ? " WHERE collection_id = CAST(?1 AS INTEGER)" : " WHERE UPPER(code) = UPPER(?1)"))
             .setParameter(1, codeOrId.trim()).getResultList();
         if (rows.isEmpty()) throw AgentApiException.notFound("COLLECTION_NOT_FOUND", "No collection " + codeOrId);
@@ -110,7 +137,7 @@ public class CollectionService {
         List<?> rows = em.createNativeQuery("""
                 SELECT i.item_id, i.item_code, i.product_id, i.colour, i.image_url, i.sort_order,
                        p.product_name, p.unit, p.selling_price, p.stock_quantity, p.is_active, p.is_online, p.ai_instructions,
-                       p.description,
+                       p.description, p.cost_price,
                        (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = i.product_id
                           AND COALESCE(pi.media_type, 'image') = 'image' ORDER BY COALESCE(pi.sort_order, 0), pi.image_id LIMIT 1)
                   FROM boutique_collection_items i LEFT JOIN products p ON p.product_id = i.product_id
@@ -126,7 +153,7 @@ public class CollectionService {
             m.put("item_code", a[1]);
             m.put("product_id", productId);
             m.put("colour", a[3]);
-            m.put("image_url", a[4] != null ? a[4] : a[14]);
+            m.put("image_url", a[4] != null ? a[4] : a[15]);
             m.put("product_name", a[6]);
             m.put("unit", a[7]);
             m.put("price", a[8] == null ? null : PricingService.money(new BigDecimal(a[8].toString())));
@@ -134,6 +161,7 @@ public class CollectionService {
             m.put("available", a[6] != null && Boolean.TRUE.equals(a[10]) && !Boolean.FALSE.equals(a[11]));
             m.put("ai_instructions", a[12]);
             m.put("description", a[13]);
+            m.put("cost_price", a[14] == null ? null : PricingService.money(new BigDecimal(a[14].toString())));
             m.put("sizes", sizes.getOrDefault(productId, List.of()));
             out.add(m);
         }
@@ -154,9 +182,19 @@ public class CollectionService {
         return out;
     }
 
-    /** Things staff should fix: wrong unit for the type, missing sizes, out of stock, prices that differ. */
-    private static List<String> warnings(String type, List<Map<String, Object>> items) {
+    /** Things staff should fix: wrong unit for the type, missing sizes, out of stock, prices that differ; dropship setup. */
+    private static List<String> warnings(String type, List<Map<String, Object>> items, Optional<DropshipService.Supplier> supplier,
+                                         DropshipService.Slabs slabs, boolean hasSupplierId) {
         List<String> out = new ArrayList<>();
+        if (DROPSHIP.equals(type)) {
+            if (supplier.isEmpty()) out.add(hasSupplierId ? "The supplier no longer exists - choose one" : "Choose the supplier");
+            else if (!supplier.get().active()) out.add("Supplier " + supplier.get().name() + " is inactive - customers can't order");
+            else if (supplier.get().pincode() == null) out.add("Supplier " + supplier.get().name() + " has no pincode - every order is charged the NATIONAL slab");
+            if (slabs.perZone().isEmpty()) out.add("Enter the courier charges (at least NATIONAL) - customers can't order without them");
+            else if (!slabs.perZone().containsKey("NATIONAL") && !slabs.perZone().containsKey("SPECIAL")) {
+                out.add("No NATIONAL courier charge - far-away pincodes use the nearest zone's charge");
+            }
+        }
         Set<BigDecimal> prices = new TreeSet<>();
         for (Map<String, Object> i : items) {
             String code = (String) i.get("item_code");
@@ -165,7 +203,9 @@ public class CollectionService {
             if (FABRIC.equals(type) && !isMetres(unit)) out.add(code + ": unit is '" + unit + "', fabric items must be sold in metres");
             if (READYMADE.equals(type) && !isPieces(unit)) out.add(code + ": unit is '" + unit + "', readymade items must be in pieces");
             if (READYMADE.equals(type) && ((List<?>) i.get("sizes")).isEmpty()) out.add(code + ": no sizes with stock entered in Products");
-            if (((BigDecimal) i.get("stock")).signum() <= 0) out.add(code + ": out of stock");
+            if (DROPSHIP.equals(type) && !isPieces(unit)) out.add(code + ": unit is '" + unit + "', dropship items must be in pieces");
+            if (DROPSHIP.equals(type) && i.get("cost_price") == null) out.add(code + ": no cost price (what the supplier charges) in Products");
+            if (!DROPSHIP.equals(type) && ((BigDecimal) i.get("stock")).signum() <= 0) out.add(code + ": out of stock");
             if (!Boolean.TRUE.equals(i.get("available"))) out.add(code + ": product is inactive or not online");
             if (i.get("price") != null) prices.add((BigDecimal) i.get("price"));
         }
@@ -183,7 +223,25 @@ public class CollectionService {
         String type = str(body.get("type")).toUpperCase(Locale.ROOT);
         if (!code.matches(CODE)) throw bad("Code must be 2-30 letters, digits or '-', e.g. MCS-1");
         if (name.isEmpty()) throw bad("Name is required");
-        if (!FABRIC.equals(type) && !READYMADE.equals(type)) throw bad("Type must be FABRIC or READYMADE");
+        if (!FABRIC.equals(type) && !READYMADE.equals(type) && !DROPSHIP.equals(type)) throw bad("Type must be FABRIC, READYMADE or DROPSHIP");
+        boolean isDropship = DROPSHIP.equals(type);
+        Integer supplierId = null;
+        if (isDropship) {
+            if (body.get("supplier_id") instanceof Number n) supplierId = n.intValue();
+            else if (!str(body.get("supplier_id")).isEmpty()) supplierId = Integer.valueOf(str(body.get("supplier_id")));
+            if (supplierId == null) throw bad("Choose the supplier");
+            if (dropship.supplier(supplierId).isEmpty()) throw bad("No supplier " + supplierId);
+        }
+        String slabs = isDropship ? dropship.slabsJson(body.get("courier_slabs")) : null;
+        BigDecimal extra = null;
+        if (isDropship && !str(body.get("courier_extra_per_piece")).isEmpty()) {
+            try {
+                extra = new BigDecimal(str(body.get("courier_extra_per_piece")));
+            } catch (NumberFormatException e) {
+                throw bad("Extra courier charge per piece must be a number");
+            }
+            if (extra.signum() < 0) throw bad("Extra courier charge per piece can't be negative");
+        }
         List<?> clash = em.createNativeQuery("SELECT collection_id FROM boutique_collections WHERE UPPER(code) = ?1")
             .setParameter(1, code).getResultList();
         if (!clash.isEmpty() && (collectionId == null || ((Number) clash.get(0)).intValue() != collectionId)) {
@@ -193,13 +251,15 @@ public class CollectionService {
         NativeQuery<?> q;
         if (collectionId == null) {
             q = em.createNativeQuery("""
-                    INSERT INTO boutique_collections (code, name, collection_type, description, cover_image_url, ai_instructions, is_active)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING collection_id""").unwrap(NativeQuery.class);
+                    INSERT INTO boutique_collections (code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
+                                                      supplier_id, courier_slabs, courier_extra_per_piece)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?10, ?11) RETURNING collection_id""").unwrap(NativeQuery.class);
         } else {
             header(String.valueOf(collectionId));
             q = em.createNativeQuery("""
                     UPDATE boutique_collections SET code = ?1, name = ?2, collection_type = ?3, description = ?4,
-                           cover_image_url = ?5, ai_instructions = ?6, is_active = ?7, updated_at = NOW()
+                           cover_image_url = ?5, ai_instructions = ?6, is_active = ?7, supplier_id = ?9, courier_slabs = ?10,
+                           courier_extra_per_piece = ?11, updated_at = NOW()
                      WHERE collection_id = ?8 RETURNING collection_id""").unwrap(NativeQuery.class);
             q.setParameter(8, collectionId, Integer.class);
         }
@@ -207,9 +267,12 @@ public class CollectionService {
             .setParameter(4, nullable(body.get("description")), String.class)
             .setParameter(5, nullable(body.get("cover_image_url")), String.class)
             .setParameter(6, nullable(body.get("ai_instructions")), String.class)
-            .setParameter(7, active, Boolean.class);
+            .setParameter(7, active, Boolean.class)
+            .setParameter(9, supplierId, Integer.class)
+            .setParameter(10, slabs, String.class)
+            .setParameter(11, extra, BigDecimal.class);
         int id = ((Number) q.getSingleResult()).intValue();
-        return get(String.valueOf(id));
+        return get(String.valueOf(id), true);
     }
 
     /** Replace the items: [{item_code, product_id, colour?, image_url?}] in display order. */
@@ -248,7 +311,7 @@ public class CollectionService {
                 .setParameter(6, order++, Integer.class)
                 .executeUpdate();
         }
-        return get(String.valueOf(collectionId));
+        return get(String.valueOf(collectionId), true);
     }
 
     @Transactional

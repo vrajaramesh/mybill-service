@@ -190,7 +190,7 @@ public class PaymentLinkService {
             order.setPaidAt(paid);
         }
         boolean fabricOnly = order.isGoods();   // fabric / readymade: nothing to stitch, dispatched from stock
-        if (fabricOnly && order.getStockReducedAt() == null) {
+        if (fabricOnly && !order.isDropship() && order.getStockReducedAt() == null) {   // dropship: the supplier's stock
             goodsService.reduceStock(order);
             order.setStockReducedAt(now());
             log.info("STOCK_REDUCED order={}", order.getOrderNo());
