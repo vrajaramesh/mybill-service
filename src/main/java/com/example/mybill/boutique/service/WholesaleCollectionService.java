@@ -54,6 +54,7 @@ public class WholesaleCollectionService {
     public record Line(String itemCode, String colour, String collectionCode, int productId, BigDecimal quantity) {}
 
     /** What the cart adds up to: GST estimate (intra-state; the total is the same inter-state). */
+    @com.fasterxml.jackson.databind.annotation.JsonNaming(com.fasterxml.jackson.databind.PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record Totals(BigDecimal subtotal, BigDecimal gst, BigDecimal totalWithGst, List<Map<String, Object>> collections) {}
 
     // ── catalog ──────────────────────────────────────────────────────────────
