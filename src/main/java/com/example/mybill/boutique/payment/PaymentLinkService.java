@@ -54,6 +54,8 @@ public class PaymentLinkService {
     @Value("${boutique.payment.link-expiry-hours:24}") private int expiryHours;
     @Value("${boutique.payment.callback-url:}") private String callbackUrl;
     @Value("${boutique.payment.brand:SRISA Boutique}") private String brand;
+    /** Firms that never get Razorpay links (wholesale: paid against the final quotation by bank / PhonePe QR). */
+    @Value("#{'${boutique.payment.no-link-schemas:firm_srihitha}'.split(',')}") private java.util.Set<String> noLinkSchemas;
 
     public enum Outcome { PAID, ALREADY_PAID, NEEDS_REVIEW, CLOSED, IGNORED, UNKNOWN_LINK }
 
@@ -63,7 +65,8 @@ public class PaymentLinkService {
     @Transactional
     public PaymentInfo createOrGetLink(String orderNo) {
         BoutiqueOrder order = requireOrder(orderNo);
-        if (order.isWholesale()) {   // the team sends the final quotation (with transport) and the bank / QR details
+        if (order.isWholesale() || noLinkSchemas.contains(String.valueOf(TenantContext.getCurrentTenant()))) {
+            // wholesale: the team sends the final quotation (with transport) and the bank / PhonePe QR details
             throw AgentApiException.conflict("ORDER_NOT_PAYABLE", "Wholesale order " + order.getOrderNo()
                 + " is paid against the final quotation our team sends");
         }
