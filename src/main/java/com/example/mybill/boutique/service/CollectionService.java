@@ -348,24 +348,24 @@ public class CollectionService {
             q = em.createNativeQuery("""
                     INSERT INTO boutique_collections (code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
                                                       supplier_id, courier_slabs, courier_extra_per_piece)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?9, ?10, ?11) RETURNING collection_id""").unwrap(NativeQuery.class);
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) RETURNING collection_id""").unwrap(NativeQuery.class);
         } else {
             header(String.valueOf(collectionId));
             q = em.createNativeQuery("""
                     UPDATE boutique_collections SET code = ?1, name = ?2, collection_type = ?3, description = ?4,
-                           cover_image_url = ?5, ai_instructions = ?6, is_active = ?7, supplier_id = ?9, courier_slabs = ?10,
-                           courier_extra_per_piece = ?11, updated_at = NOW()
-                     WHERE collection_id = ?8 RETURNING collection_id""").unwrap(NativeQuery.class);
-            q.setParameter(8, collectionId, Integer.class);
+                           cover_image_url = ?5, ai_instructions = ?6, is_active = ?7, supplier_id = ?8, courier_slabs = ?9,
+                           courier_extra_per_piece = ?10, updated_at = NOW()
+                     WHERE collection_id = ?11 RETURNING collection_id""").unwrap(NativeQuery.class);
+            q.setParameter(11, collectionId, Integer.class);
         }
         q.setParameter(1, code, String.class).setParameter(2, name, String.class).setParameter(3, type, String.class)
             .setParameter(4, nullable(body.get("description")), String.class)
             .setParameter(5, nullable(body.get("cover_image_url")), String.class)
             .setParameter(6, nullable(body.get("ai_instructions")), String.class)
             .setParameter(7, active, Boolean.class)
-            .setParameter(9, supplierId, Integer.class)
-            .setParameter(10, slabs, String.class)
-            .setParameter(11, extra, BigDecimal.class);
+            .setParameter(8, supplierId, Integer.class)
+            .setParameter(9, slabs, String.class)
+            .setParameter(10, extra, BigDecimal.class);
         int id = ((Number) q.getSingleResult()).intValue();
         return get(String.valueOf(id), true);
     }
