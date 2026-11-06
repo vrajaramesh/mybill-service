@@ -14,13 +14,22 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** mybill-ui "Boutique → Collections": fabric / readymade collections (one Instagram post each) and their items. */
+/** mybill-ui "Boutique → Collections": fabric / readymade / dropship / wholesale collections (one Instagram post each) and their items. */
 @RestController
 @RequestMapping("/api/boutique-collections")
 public class CollectionAdminController {
 
     @Autowired private CollectionService collections;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
+    @Autowired private com.example.mybill.wholesale.config.WholesaleSchemaInitializer wholesaleSchema;
+    @Autowired private com.example.mybill.boutique.service.WholesaleCollectionService wholesaleCollections;
+
+    /** Active Wholesale-module products for the items of a WHOLESALE collection. */
+    @GetMapping("/wholesale-products")
+    public List<Map<String, Object>> wholesaleProducts() {
+        requireFirm();
+        return wholesaleCollections.pickList();
+    }
 
     @GetMapping
     public List<Map<String, Object>> list() {
@@ -76,5 +85,6 @@ public class CollectionAdminController {
             throw new AgentApiException(HttpStatus.FORBIDDEN, "FORBIDDEN", "Collections require a firm login", null);
         }
         schemaInitializer.ensureSchema(schema);
+        wholesaleSchema.ensureSchema(schema);   // WHOLESALE collections read the Wholesale module's products
     }
 }

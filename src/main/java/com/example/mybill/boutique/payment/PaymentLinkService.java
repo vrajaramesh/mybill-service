@@ -63,6 +63,10 @@ public class PaymentLinkService {
     @Transactional
     public PaymentInfo createOrGetLink(String orderNo) {
         BoutiqueOrder order = requireOrder(orderNo);
+        if (order.isWholesale()) {   // the team sends the final quotation (with transport) and the bank / QR details
+            throw AgentApiException.conflict("ORDER_NOT_PAYABLE", "Wholesale order " + order.getOrderNo()
+                + " is paid against the final quotation our team sends");
+        }
         if (!order.getStatus().isPayable()) {
             throw AgentApiException.conflict("ORDER_NOT_PAYABLE", "Order " + order.getOrderNo() + " is " + order.getStatus());
         }

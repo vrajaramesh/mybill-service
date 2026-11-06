@@ -19,11 +19,13 @@ import java.util.*;
  * JSON keys are snake_case for both.
  * DROPSHIP collections (V16) are a supplier's products: readymade-like (pieces, sizes) but the supplier holds the stock,
  * and they carry the supplier and its courier charges per zone. The supplier and cost prices are only in the staff view.
+ * WHOLESALE collections (V17) are a wholesale product's designs: items point to wholesale_products (the Wholesale
+ * module), which gives name, unit, photo, stock, price slabs, minimum order and GST (WholesaleCollectionService).
  */
 @Service
 public class CollectionService {
 
-    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP";
+    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP", WHOLESALE = "WHOLESALE";
     static final Set<String> METRE_UNITS = Set.of("m", "meter", "meters", "metre", "metres", "mts", "mtr", "mtrs");
     static final Set<String> PIECE_UNITS = Set.of("pcs", "pc", "piece", "pieces", "nos", "no");
     static final int MAX_ITEMS = 60;
@@ -31,6 +33,7 @@ public class CollectionService {
 
     @PersistenceContext private EntityManager em;
     @org.springframework.beans.factory.annotation.Autowired private DropshipService dropship;
+    @org.springframework.beans.factory.annotation.Autowired private WholesaleCollectionService wholesale;
 
     public static boolean isMetres(String unit) {
         return unit != null && METRE_UNITS.contains(unit.trim().toLowerCase(Locale.ROOT));
@@ -83,7 +86,8 @@ public class CollectionService {
         out.put("cover_image_url", c[5]);
         out.put("ai_instructions", c[6]);
         out.put("active", c[7]);
-        List<Map<String, Object>> items = items(id);
+        boolean isWholesale = WHOLESALE.equals(c[3]);
+        List<Map<String, Object>> items = isWholesale ? wholesaleItems(id) : items(id);
         boolean isDropship = DROPSHIP.equals(c[3]);
         Optional<DropshipService.Supplier> supplier = isDropship ? dropship.supplier(c[8] == null ? null : ((Number) c[8]).intValue())
             : Optional.empty();
@@ -92,6 +96,8 @@ public class CollectionService {
             out.put("dropship", true);
             out.put("dispatch_days", supplier.map(DropshipService.Supplier::dispatchDays).orElse(null));
         }
+        Map<String, Object> pricing = isWholesale ? wholesalePricing(items) : null;
+        if (isWholesale) out.put("wholesale", pricing);
         if (staff) {
             out.put("supplier_id", c[8]);
             out.put("supplier_name", supplier.map(DropshipService.Supplier::name).orElse(null));
@@ -99,9 +105,12 @@ public class CollectionService {
             out.put("courier_extra_per_piece", c[10]);
         } else {
             items.forEach(i -> i.remove("cost_price"));
+            if (isWholesale) items.forEach(i -> i.remove("stock"));   // the assistant only says in stock or not
         }
         out.put("items", items);
-        out.put("warnings", warnings((String) c[3], items, supplier, slabs, isDropship && c[8] != null));
+        List<String> warnings = warnings((String) c[3], items, supplier, slabs, isDropship && c[8] != null);
+        if (isWholesale) warnings.addAll(wholesaleWarnings(items, pricing));
+        out.put("warnings", warnings);
         if (!staff) out.remove("warnings");
         return out;
     }
@@ -168,6 +177,89 @@ public class CollectionService {
         return out;
     }
 
+    /** Items of a WHOLESALE collection, filled from their wholesale products. */
+    private List<Map<String, Object>> wholesaleItems(int collectionId) {
+        List<?> rows = em.createNativeQuery("""
+                SELECT item_id, item_code, wholesale_product_id, colour, image_url FROM boutique_collection_items
+                 WHERE collection_id = ?1 ORDER BY sort_order, item_id""").setParameter(1, collectionId).getResultList();
+        Set<Integer> ids = new HashSet<>();
+        for (Object r : rows) if (((Object[]) r)[2] != null) ids.add(((Number) ((Object[]) r)[2]).intValue());
+        Map<Integer, WholesaleCollectionService.Product> products = wholesale.products(ids);
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object r : rows) {
+            Object[] a = (Object[]) r;
+            WholesaleCollectionService.Product p = a[2] == null ? null : products.get(((Number) a[2]).intValue());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("item_id", a[0]);
+            m.put("item_code", a[1]);
+            m.put("wholesale_product_id", a[2]);
+            m.put("colour", a[3]);
+            m.put("image_url", a[4] != null ? a[4] : p == null ? null : p.imageUrl());
+            m.put("product_name", p == null ? null : p.name());
+            m.put("product_code", p == null ? null : p.code());
+            m.put("unit", p == null ? null : p.unit());
+            m.put("stock", p == null ? BigDecimal.ZERO : WholesaleCollectionService.plain(p.available()));
+            m.put("in_stock", p != null && p.available().signum() > 0);
+            m.put("available", p != null && p.active());
+            m.put("ai_instructions", p == null ? null : p.aiInstructions());
+            m.put("description", p == null ? null : p.description());
+            out.add(m);
+        }
+        return out;
+    }
+
+    /**
+     * Price slabs and minimum order of the collection's wholesale product (or, if items use several products, of each).
+     * They apply to the collection's TOTAL quantity across its codes.
+     */
+    private Map<String, Object> wholesalePricing(List<Map<String, Object>> items) {
+        Set<Integer> ids = new LinkedHashSet<>();
+        for (Map<String, Object> i : items) if (i.get("wholesale_product_id") instanceof Number n) ids.add(n.intValue());
+        Map<Integer, WholesaleCollectionService.Product> products = wholesale.products(ids);
+        Map<String, Object> out = new LinkedHashMap<>();
+        List<Map<String, Object>> each = new ArrayList<>();
+        for (Integer id : ids) {
+            WholesaleCollectionService.Product p = products.get(id);
+            if (p == null) continue;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("product_name", p.name());
+            m.putAll(wholesale.pricing(p));
+            each.add(m);
+        }
+        if (each.size() == 1) out.putAll(each.get(0));
+        else out.put("products", each);
+        out.put("note", "Prices are per unit and exclude GST. The price slab and the minimum order apply to the TOTAL "
+            + "quantity of all codes of this collection together. Transport is extra - our team adds it in the final quotation.");
+        return out;
+    }
+
+    private static List<String> wholesaleWarnings(List<Map<String, Object>> items, Map<String, Object> pricing) {
+        List<String> out = new ArrayList<>();
+        Set<String> units = new TreeSet<>();
+        for (Map<String, Object> i : items) {
+            String code = (String) i.get("item_code");
+            if (i.get("product_name") == null) { out.add(code + ": choose the wholesale product"); continue; }
+            if (!Boolean.TRUE.equals(i.get("available"))) out.add(code + ": wholesale product is inactive");
+            else if (!Boolean.TRUE.equals(i.get("in_stock"))) out.add(code + ": wholesale product is out of stock");
+            if (i.get("unit") != null) units.add(String.valueOf(i.get("unit")));
+        }
+        List<Map<String, Object>> products = pricing.get("products") instanceof List<?> l
+            ? l.stream().map(o -> (Map<String, Object>) castMap(o)).toList() : List.of(pricing);
+        for (Map<String, Object> p : products) {
+            if (p.get("product_name") != null && (!(p.get("price_slabs") instanceof List<?> slabs) || slabs.isEmpty())) {
+                out.add(p.get("product_name") + ": no price slabs in Wholesale → Pricing - buyers can't order");
+            }
+        }
+        if (units.size() > 1) out.add("Items are sold in different units " + units + " - one collection should use one unit");
+        if (products.size() > 1) out.add("Items use different wholesale products - each product's own slabs and minimum apply");
+        return out;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Object o) {
+        return (Map<String, Object>) o;
+    }
+
     private Map<Integer, List<Map<String, Object>>> sizesFor(List<Integer> productIds) {
         Map<Integer, List<Map<String, Object>>> out = new HashMap<>();
         if (productIds.isEmpty()) return out;
@@ -186,6 +278,7 @@ public class CollectionService {
     private static List<String> warnings(String type, List<Map<String, Object>> items, Optional<DropshipService.Supplier> supplier,
                                          DropshipService.Slabs slabs, boolean hasSupplierId) {
         List<String> out = new ArrayList<>();
+        if (WHOLESALE.equals(type)) return out;   // see wholesaleWarnings
         if (DROPSHIP.equals(type)) {
             if (supplier.isEmpty()) out.add(hasSupplierId ? "The supplier no longer exists - choose one" : "Choose the supplier");
             else if (!supplier.get().active()) out.add("Supplier " + supplier.get().name() + " is inactive - customers can't order");
@@ -223,7 +316,9 @@ public class CollectionService {
         String type = str(body.get("type")).toUpperCase(Locale.ROOT);
         if (!code.matches(CODE)) throw bad("Code must be 2-30 letters, digits or '-', e.g. MCS-1");
         if (name.isEmpty()) throw bad("Name is required");
-        if (!FABRIC.equals(type) && !READYMADE.equals(type) && !DROPSHIP.equals(type)) throw bad("Type must be FABRIC, READYMADE or DROPSHIP");
+        if (!FABRIC.equals(type) && !READYMADE.equals(type) && !DROPSHIP.equals(type) && !WHOLESALE.equals(type)) {
+            throw bad("Type must be FABRIC, READYMADE, DROPSHIP or WHOLESALE");
+        }
         boolean isDropship = DROPSHIP.equals(type);
         Integer supplierId = null;
         if (isDropship) {
@@ -275,17 +370,18 @@ public class CollectionService {
         return get(String.valueOf(id), true);
     }
 
-    /** Replace the items: [{item_code, product_id, colour?, image_url?}] in display order. */
+    /** Replace the items: [{item_code, product_id (wholesale: wholesale_product_id), colour?, image_url?}] in display order. */
     @Transactional
     public Map<String, Object> replaceItems(int collectionId, List<Map<String, Object>> items) {
-        header(String.valueOf(collectionId));
+        boolean isWholesale = WHOLESALE.equals(header(String.valueOf(collectionId))[3]);
+        String idKey = isWholesale ? "wholesale_product_id" : "product_id";
         if (items.size() > MAX_ITEMS) throw bad("At most " + MAX_ITEMS + " items per collection");
         Set<String> codes = new HashSet<>();
         for (Map<String, Object> item : items) {
             String code = str(item.get("item_code")).toUpperCase(Locale.ROOT);
             if (!code.matches(CODE)) throw bad("Item code '" + code + "' must be 2-30 letters, digits or '-', e.g. MCS-1A");
             if (!codes.add(code)) throw bad("Item code " + code + " is used twice");
-            if (!(item.get("product_id") instanceof Number)) throw bad("Choose a product for " + code);
+            if (!(item.get(idKey) instanceof Number)) throw bad("Choose a " + (isWholesale ? "wholesale " : "") + "product for " + code);
         }
         if (!codes.isEmpty()) {
             List<?> elsewhere = em.createNativeQuery("""
@@ -297,15 +393,23 @@ public class CollectionService {
                 throw new AgentApiException(HttpStatus.CONFLICT, "ITEM_CODE_TAKEN", "Item code " + a[0] + " is already in collection " + a[1], null);
             }
         }
+        if (isWholesale) {
+            Set<Integer> ids = new HashSet<>();
+            items.forEach(i -> ids.add(((Number) i.get(idKey)).intValue()));
+            Set<Integer> known = wholesale.products(ids).keySet();
+            for (Integer id : ids) if (!known.contains(id)) throw bad("No wholesale product " + id);
+        }
         em.createNativeQuery("DELETE FROM boutique_collection_items WHERE collection_id = ?1").setParameter(1, collectionId).executeUpdate();
         int order = 0;
         for (Map<String, Object> item : items) {
             em.createNativeQuery("""
-                    INSERT INTO boutique_collection_items (collection_id, item_code, product_id, colour, image_url, sort_order)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6)""").unwrap(NativeQuery.class)
+                    INSERT INTO boutique_collection_items (collection_id, item_code, product_id, colour, image_url, sort_order,
+                                                           wholesale_product_id)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)""").unwrap(NativeQuery.class)
                 .setParameter(1, collectionId, Integer.class)
                 .setParameter(2, str(item.get("item_code")).toUpperCase(Locale.ROOT), String.class)
-                .setParameter(3, ((Number) item.get("product_id")).intValue(), Integer.class)
+                .setParameter(3, isWholesale ? null : ((Number) item.get("product_id")).intValue(), Integer.class)
+                .setParameter(7, isWholesale ? ((Number) item.get(idKey)).intValue() : null, Integer.class)
                 .setParameter(4, nullable(item.get("colour")), String.class)
                 .setParameter(5, nullable(item.get("image_url")), String.class)
                 .setParameter(6, order++, Integer.class)

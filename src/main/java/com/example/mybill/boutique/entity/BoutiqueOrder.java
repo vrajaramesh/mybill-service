@@ -17,6 +17,7 @@ public class BoutiqueOrder {
     public static final String TYPE_READYMADE = "READYMADE";
     public static final String TYPE_MIXED = "MIXED";        // fabric and readymade lines in one order
     public static final String TYPE_DROPSHIP = "DROPSHIP";  // a supplier's products, shipped by the supplier (V16)
+    public static final String TYPE_WHOLESALE = "WHOLESALE"; // wholesale collection: a quotation draft, no payment link (V17)
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -120,6 +121,18 @@ public class BoutiqueOrder {
     @Column(name = "courier_tracking_url", length = 500) private String courierTrackingUrl;
     public String getCourierTrackingUrl() { return courierTrackingUrl; }
     public void setCourierTrackingUrl(String v) { this.courierTrackingUrl = v; }
+
+    // Wholesale orders (V17): GST estimate and the quotation draft made in the Wholesale module.
+    @Column(name = "gst_amount", precision = 12, scale = 2) private java.math.BigDecimal gstAmount;
+    @Column(name = "wholesale_customer_id") private Integer wholesaleCustomerId;
+    @Column(name = "wholesale_quotation_id") private Integer wholesaleQuotationId;
+    public java.math.BigDecimal getGstAmount() { return gstAmount; }
+    public void setGstAmount(java.math.BigDecimal v) { this.gstAmount = v; }
+    public Integer getWholesaleCustomerId() { return wholesaleCustomerId; }
+    public void setWholesaleCustomerId(Integer v) { this.wholesaleCustomerId = v; }
+    public Integer getWholesaleQuotationId() { return wholesaleQuotationId; }
+    public void setWholesaleQuotationId(Integer v) { this.wholesaleQuotationId = v; }
+    public boolean isWholesale() { return TYPE_WHOLESALE.equals(orderType); }
 
     /** The link the customer tracks her parcel with (null when not shipped, or another courier without a link). */
     public String trackingUrl() {

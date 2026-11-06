@@ -48,7 +48,8 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
         "db/boutique/V13__collections_and_size_stock.sql",
         "db/boutique/V14__goods_orders.sql",
         "db/boutique/V15__courier_delhivery.sql",
-        "db/boutique/V16__dropship.sql");
+        "db/boutique/V16__dropship.sql",
+        "db/boutique/V17__wholesale_collections.sql");
 
     /** Public-schema objects (idempotent, run on every startup). */
     static final String PUBLIC_SCRIPT = "db/boutique/public_razorpay_webhook_events.sql";

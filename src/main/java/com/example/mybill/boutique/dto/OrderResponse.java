@@ -42,5 +42,8 @@ public record OrderResponse(
     LocalDateTime shippedAt,
     LocalDateTime deliveredAt,
     /** Parcel weight (contents + cover) the delivery charge was quoted on. */
-    Integer shipWeightGrams
+    Integer shipWeightGrams,
+    /** WHOLESALE orders: GST estimate (total includes it) and the quotation draft in the Wholesale module. */
+    BigDecimal gstAmount,
+    Integer wholesaleQuotationId
 ) {}

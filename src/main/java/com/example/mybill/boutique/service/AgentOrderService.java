@@ -40,6 +40,7 @@ public class AgentOrderService {
     @Autowired private GoodsService goodsService;
     @Autowired private com.example.mybill.boutique.courier.CourierRateService courierRates;
     @Autowired private PincodeFormatShippingService pincodeFormat;
+    @Autowired private WholesaleCollectionService wholesaleCollections;
     /** Days to cut and pack a fabric order before it ships. */
     @org.springframework.beans.factory.annotation.Value("${boutique.fabric.dispatch-days:1}")
     private int fabricDispatchDays;
@@ -201,10 +202,11 @@ public class AgentOrderService {
     public GoodsQuoteResponse goodsQuote(GoodsQuoteRequest request) {
         GoodsService.Priced p = goodsService.price(request.lines(), request.pincode());
         ShippingService.ShippingEstimate ship = goodsShipping(p, request.pincode());
-        PriceBreakdown b = p.dropship() != null ? p.breakdown()
+        PriceBreakdown b = p.dropship() != null || p.wholesale() != null ? p.breakdown()
             : courierRates.rate(p.breakdown(), request.pincode(), goodsGrams(p.lines())).breakdown();
-        return new GoodsQuoteResponse(p.lines(), b, p.orderType(), ship.serviceable(), ship.transitDays(),
-            ship.estimatedDeliveryDate());
+        boolean wholesale = p.wholesale() != null;   // transport and dispatch are agreed in the final quotation
+        return new GoodsQuoteResponse(p.lines(), b, p.orderType(), ship.serviceable(), wholesale ? null : ship.transitDays(),
+            wholesale ? null : ship.estimatedDeliveryDate(), p.wholesale());
     }
 
     /** A DRAFT goods order (order_type FABRIC / READYMADE / MIXED); same idempotency rules as {@link #create}. */
@@ -222,7 +224,7 @@ public class AgentOrderService {
             throw AgentApiException.unprocessable("PINCODE_NOT_SERVICEABLE", "We cannot deliver to this pincode yet",
                 Map.of("pincode", request.delivery().pincode(), "reason", String.valueOf(ship.reason())));
         }
-        com.example.mybill.boutique.courier.CourierRateService.Rated rated = p.dropship() != null
+        com.example.mybill.boutique.courier.CourierRateService.Rated rated = p.dropship() != null || p.wholesale() != null
             ? new com.example.mybill.boutique.courier.CourierRateService.Rated(p.breakdown(), null, false)
             : courierRates.rate(p.breakdown(), request.delivery().pincode(), goodsGrams(p.lines()));
         BoutiqueOrder order = newOrder(request.customerId(), request.delivery(), rated.breakdown(), request.channel(),
@@ -236,8 +238,12 @@ public class AgentOrderService {
             order.setSupplierCourier(p.dropship().courier());
             order.setSupplierZone(p.dropship().zone());
         }
+        if (p.wholesale() != null) {
+            order.setGstAmount(p.wholesale().gst());
+            order.setEstimatedDeliveryDate(null);
+        }
         for (GoodsLineResponse l : p.lines()) {
-            boolean fabric = GoodsService.FABRIC.equals(l.kind());
+            boolean fabric = GoodsService.FABRIC.equals(l.kind()) || GoodsService.WHOLESALE.equals(l.kind());   // wholesale: any unit, kept in fabric_metres
             BoutiqueOrderItem item = new BoutiqueOrderItem();
             item.setItemKind(l.kind());
             item.setItemCode(l.itemCode());
@@ -259,6 +265,10 @@ public class AgentOrderService {
             }
             item.setLineTotal(l.lineTotal());
             order.addItem(item);
+        }
+        if (p.wholesale() != null) {
+            String phone = customerRepository.findById(request.customerId()).map(c -> c.getPhoneE164()).orElse(null);
+            wholesaleCollections.createQuotation(order, p, phone, "WhatsApp AI");
         }
         return new CreateResult(toResponse(orderRepository.save(order)), true);
     }
@@ -442,6 +452,7 @@ public class AgentOrderService {
      * their own courier - so only the pincode format is checked (not Delhivery's serviceability).
      */
     private ShippingService.ShippingEstimate goodsShipping(GoodsService.Priced p, String pincode) {
+        if (p.wholesale() != null) return pincodeFormat.estimate(pincode, fabricDispatchDays, LocalDate.now(IST));
         if (p.dropship() != null) return pincodeFormat.estimate(pincode, p.dropship().dispatchDays(), LocalDate.now(IST));
         return shippingService.estimate(pincode, fabricDispatchDays, LocalDate.now(IST));
     }
@@ -511,7 +522,8 @@ public class AgentOrderService {
             o.getMeasurementStatus(), o.getMeasurementTakenAt(), o.getMeasurementTakenBy(),
             o.getCreatedAt(), o.getOrderType(), o.getCourier(), o.getAwb(),
             o.trackingUrl(), o.getCourierStatus(),
-            o.getCourierLocation(), o.getCourierStatusAt(), o.getShippedAt(), o.getDeliveredAt(), o.getShipWeightGrams());
+            o.getCourierLocation(), o.getCourierStatusAt(), o.getShippedAt(), o.getDeliveredAt(), o.getShipWeightGrams(),
+            o.getGstAmount(), o.getWholesaleQuotationId());
     }
 
     private String toJson(Object value) {

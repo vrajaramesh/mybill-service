@@ -26,7 +26,7 @@ import java.util.*;
 @Service
 public class GoodsService {
 
-    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP";
+    public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP", WHOLESALE = "WHOLESALE";
     static final BigDecimal MIN_METRES = BigDecimal.ONE;
 
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(GoodsService.class);
@@ -34,9 +34,11 @@ public class GoodsService {
     @PersistenceContext private EntityManager em;
     @org.springframework.beans.factory.annotation.Autowired private PricingService pricing;
     @org.springframework.beans.factory.annotation.Autowired private DropshipService dropshipService;
+    @org.springframework.beans.factory.annotation.Autowired private WholesaleCollectionService wholesaleCollections;
 
-    /** dropship is set for a dropship cart (order_type DROPSHIP). */
-    public record Priced(List<GoodsLineResponse> lines, PriceBreakdown breakdown, String orderType, Dropship dropship) {}
+    /** dropship is set for a dropship cart (order_type DROPSHIP), wholesale for a wholesale cart (WHOLESALE). */
+    public record Priced(List<GoodsLineResponse> lines, PriceBreakdown breakdown, String orderType, Dropship dropship,
+                         WholesaleCollectionService.Totals wholesale) {}
 
     /** What a dropship cart owes the supplier: cost = products' cost price x qty; courier = their slab (zone null = no pincode yet). */
     public record Dropship(int supplierId, String supplierName, int dispatchDays, BigDecimal cost, BigDecimal courier, String zone) {}
@@ -55,22 +57,29 @@ public class GoodsService {
     @Transactional(readOnly = true)
     public Priced price(List<GoodsLine> lines, String pincode) {
         Map<String, Object[]> items = new HashMap<>();          // ITEM CODE -> {product_id, colour, item_code, DropshipSource}
+        Map<String, Object[]> wholesaleItems = new HashMap<>(); // ITEM CODE -> {wholesale_product_id, colour, item_code, collection code}
         Set<String> codes = new HashSet<>();
         for (GoodsLine l : lines) if (l.itemCode() != null && !l.itemCode().isBlank()) codes.add(l.itemCode().trim().toUpperCase(Locale.ROOT));
         if (!codes.isEmpty()) {
             for (Object r : em.createNativeQuery("""
                     SELECT UPPER(i.item_code), i.product_id, i.colour, i.item_code, c.collection_type, c.code, c.supplier_id,
-                           c.courier_slabs, c.courier_extra_per_piece
+                           c.courier_slabs, c.courier_extra_per_piece, i.wholesale_product_id
                       FROM boutique_collection_items i JOIN boutique_collections c ON c.collection_id = i.collection_id
                      WHERE UPPER(i.item_code) IN (?1)""")
                     .setParameter(1, codes).getResultList()) {
                 Object[] a = (Object[]) r;
+                if (WHOLESALE.equals(a[4])) {
+                    if (a[9] != null) wholesaleItems.put((String) a[0], new Object[]{((Number) a[9]).intValue(), a[2], a[3], a[5]});
+                    continue;
+                }
+                if (a[1] == null) continue;
                 DropshipSource ds = DROPSHIP.equals(a[4]) ? new DropshipSource((String) a[5],
                     a[6] == null ? null : ((Number) a[6]).intValue(), (String) a[7],
                     a[8] == null ? null : new BigDecimal(a[8].toString())) : null;
                 items.put((String) a[0], new Object[]{((Number) a[1]).intValue(), a[2], a[3], ds});
             }
         }
+        if (!wholesaleItems.isEmpty()) return wholesale(lines, wholesaleItems);
         Set<Integer> productIds = new HashSet<>();
         for (GoodsLine l : lines) {
             if (l.itemCode() != null && !l.itemCode().isBlank()) {
@@ -181,7 +190,21 @@ public class GoodsService {
             return dropship(out, subtotal, kinds, dropshipSources, dropshipCost, dropshipPieces, pincode);
         }
         String type = kinds.size() > 1 ? BoutiqueOrder.TYPE_MIXED : (kinds.contains(FABRIC) ? BoutiqueOrder.TYPE_FABRIC : BoutiqueOrder.TYPE_READYMADE);
-        return new Priced(out, pricing.priceSubtotal(subtotal), type, null);
+        return new Priced(out, pricing.priceSubtotal(subtotal), type, null, null);
+    }
+
+    /** A wholesale cart: wholesale collection items only (priced by the Wholesale module's slabs). */
+    private Priced wholesale(List<GoodsLine> lines, Map<String, Object[]> wholesaleItems) {
+        List<WholesaleCollectionService.Line> out = new ArrayList<>();
+        for (GoodsLine l : lines) {
+            Object[] item = l.itemCode() == null ? null : wholesaleItems.get(l.itemCode().trim().toUpperCase(Locale.ROOT));
+            if (item == null) {
+                throw err("WHOLESALE_SEPARATE_ORDER", "Wholesale items are ordered separately from other items",
+                    Map.of("hint", "Finish the wholesale order first, then order the other items separately."));
+            }
+            out.add(new WholesaleCollectionService.Line((String) item[2], (String) item[1], (String) item[3], (Integer) item[0], l.quantity()));
+        }
+        return wholesaleCollections.price(out);
     }
 
     /** A dropship cart: one supplier only; delivery = the highest slab of its collections for the zone + extra pieces. */
@@ -220,7 +243,7 @@ public class GoodsService {
         PriceBreakdown b = new PriceBreakdown(st, List.of(), PricingService.money(BigDecimal.ZERO), st, 1, st, courier,
             null, PricingService.money(st.add(courier)), PricingService.CURRENCY);
         return new Priced(out, b, BoutiqueOrder.TYPE_DROPSHIP,
-            new Dropship(supplier.id(), supplier.name(), supplier.dispatchDays(), PricingService.money(cost), courier, zone));
+            new Dropship(supplier.id(), supplier.name(), supplier.dispatchDays(), PricingService.money(cost), courier, zone), null);
     }
 
     private Map<Integer, Product> products(Set<Integer> ids) {
@@ -259,7 +282,7 @@ public class GoodsService {
     public void reduceStock(BoutiqueOrder order) {
         for (var item : order.getItems()) {
             Integer productId = item.getFabricProductId();
-            if (productId == null || DROPSHIP.equals(item.getItemKind())) continue;   // the supplier holds dropship stock
+            if (productId == null || DROPSHIP.equals(item.getItemKind()) || WHOLESALE.equals(item.getItemKind())) continue;   // supplier / wholesale stock
             BigDecimal qty = item.getFabricMetres() != null ? item.getFabricMetres() : BigDecimal.valueOf(item.getQuantity());
             String size = item.getSizeCode();
             int sized = 0;
