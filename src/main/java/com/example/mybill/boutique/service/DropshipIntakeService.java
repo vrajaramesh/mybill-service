@@ -263,7 +263,7 @@ public class DropshipIntakeService {
             if (!pin.isEmpty()) body.put("pincode", pin);
             DropshipService.Supplier s = dropship.saveSupplier(null, body);
             assign(waiting.get(), s, photoCount(waiting.get()), "new supplier added");
-            return Map.of("handled", true, "action", "supplier_created", "supplier_id", s.id());
+            return Map.of("handled", true, "action", "supplier_created", "supplier_id", s.id(), "batch_id", waiting.get().getBatchId());
         }
         if (t.toUpperCase(Locale.ROOT).startsWith("SUPPLIER ") && waiting.isPresent()) {
             String q = t.substring(9).trim().toLowerCase(Locale.ROOT);
@@ -273,7 +273,7 @@ public class DropshipIntakeService {
                 .toList();
             if (found.size() == 1) {
                 assign(waiting.get(), found.get(0), photoCount(waiting.get()), "chosen by you");
-                return Map.of("handled", true, "action", "supplier_set");
+                return Map.of("handled", true, "action", "supplier_set", "batch_id", waiting.get().getBatchId());
             }
             tell(waiting.get(), "text", found.isEmpty() ? "No supplier matches \"" + q + "\"." : "Several suppliers match \""
                 + q + "\" - send a longer name or their phone.", null, null);

@@ -23,6 +23,16 @@ public class AgentDropshipController {
     @Autowired private DropshipIntakeService intake;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
     @Autowired private com.example.mybill.boutique.service.OwnerNumberService ownerNumbers;
+    @Autowired private com.example.mybill.boutique.service.DropshipExtractionService extraction;
+
+    /** Build the DRAFT collection of a post whose supplier is chosen (AI extraction, 20-90 s). Body {batch_id}. */
+    @PostMapping("/extract")
+    public Map<String, Object> extract(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        Object id = body.get("batch_id");
+        if (id == null) throw new AgentApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "batch_id is required", null);
+        return extraction.extract(Integer.parseInt(String.valueOf(id)));
+    }
 
     /** Active owner numbers (digits with country code): srisa-agent routes their messages to the intake. */
     @GetMapping("/owner-numbers")
