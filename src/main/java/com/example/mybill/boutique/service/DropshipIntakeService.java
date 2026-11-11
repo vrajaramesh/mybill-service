@@ -26,19 +26,21 @@ import java.util.regex.Pattern;
  * WhatsApp → Dropship intake (phase 2). The owner forwards a supplier's post (text + one photo per colour) to the
  * shop's number; srisa-agent (which owns the WhatsApp webhook) hands each message to {@link #intake}. Messages of one
  * sender form one COLLECTING batch until {@code dropship.intake.idle-seconds} pass without a new one; then
- * {@link #processBatches} (called by a delayed Cloud Task, so it works with min-instances=0) closes it and picks the
- * supplier: a phone number in the post that matches a supplier, else the owner chooses from a WhatsApp list
- * (AWAITING_SUPPLIER). Building the collection from a closed batch is phase 3 (status EXTRACTING).
+ * {@link #processBatches} (called by a delayed Cloud Task, so it works with min-instances=0) closes it and asks the
+ * owner which supplier it is from - every time, never automatically (forwards don't carry the original sender): the
+ * first photo with the post's text, then a WhatsApp list of the dropship-active suppliers, most recently used first,
+ * 9 per page + "More suppliers" (AWAITING_SUPPLIER; a reminder after 2 h). The choice sets the batch's (and its
+ * collection's) supplier and the batch moves on to AI extraction (phase 3, status EXTRACTING).
  */
 @Service
 public class DropshipIntakeService {
 
     private static final Logger log = LoggerFactory.getLogger(DropshipIntakeService.class);
     private static final ZoneId ZONE = ZoneId.systemDefault();
-    /** Indian mobile numbers in free text: optional +91 / 91 / 0, then 10 digits starting 6-9 (spaces / dashes allowed). */
-    private static final Pattern PHONE = Pattern.compile("(?<!\\d)(?:\\+?91[\\s-]?|0)?([6-9](?:[\\s-]?\\d){9})(?!\\d)");
-    public static final String SUPPLIER_REPLY = "dsup:";   // list row id: dsup:<batchId>:<supplierId|new>
-    private static final int MAX_LIST_ROWS = 10;           // WhatsApp list message limit (all sections together)
+    /** List row ids: "{batchId}:{supplierId}" or "{batchId}:MORE:{page}". */
+    private static final Pattern SUPPLIER_ROW = Pattern.compile("^(\\d+):(?:(MORE):)?(\\d+)$");
+    private static final int PAGE_SIZE = 9;               // + "More suppliers" = WhatsApp's 10-row list limit
+    private static final int REMIND_AFTER_HOURS = 2;
 
     @Autowired private WaIntakeBatchRepository batches;
     @Autowired private WaIntakeMessageRepository messages;
@@ -55,7 +57,7 @@ public class DropshipIntakeService {
 
     /** Sent to the owner's WhatsApp by srisa-agent after the DB commit (event "owner.message"). */
     public record OwnerMessage(String to, String eventId, String kind, String text, String buttonText,
-                               List<Map<String, Object>> sections) {}
+                               List<Map<String, Object>> sections, String imageUrl, String imageCaption) {}
 
     // ── intake ───────────────────────────────────────────────────────────────
 
@@ -119,6 +121,7 @@ public class DropshipIntakeService {
         if (forceFrom != null) batches.findFirstByFromNumberAndStatus(digits(forceFrom), WaIntakeBatch.COLLECTING)
             .filter(b -> due.stream().noneMatch(d -> d.getBatchId().equals(b.getBatchId()))).ifPresent(due::add);
         Map<String, Integer> counts = new LinkedHashMap<>(Map.of("closed", 0, "awaiting_supplier", 0, "extracting", 0, "failed", 0));
+        List<Integer> asked = new ArrayList<>();
         for (WaIntakeBatch candidate : due) {
             // Lock, then re-check: a photo may have arrived (or another task closed it) since the query.
             WaIntakeBatch b = lock(candidate);
@@ -128,14 +131,37 @@ public class DropshipIntakeService {
             close(b);
             counts.merge("closed", 1, Integer::sum);
             counts.merge(b.getStatus().toLowerCase(Locale.ROOT), 1, Integer::sum);
+            if (WaIntakeBatch.AWAITING_SUPPLIER.equals(b.getStatus())) asked.add(b.getBatchId());
         }
-        return new LinkedHashMap<>(counts);
+        Map<String, Object> out = new LinkedHashMap<>(counts);
+        out.put("awaiting_supplier_ids", asked);   // the agent schedules a reminder task for each
+        out.put("reminded", remindDue());
+        return out;
+    }
+
+    /** Re-sends the supplier list once for posts still waiting 2 h after the question. Returns how many. */
+    @Transactional
+    public int remindDue() {
+        int n = 0;
+        for (WaIntakeBatch b : batches.findByStatusAndSupplierAskedAtBeforeAndRemindedAtIsNull(
+                WaIntakeBatch.AWAITING_SUPPLIER, LocalDateTime.now().minusHours(REMIND_AFTER_HOURS))) {
+            b.setRemindedAt(LocalDateTime.now());
+            askSupplier(b, messages.findByBatchIdOrderByReceivedAtAscMessageIdAsc(b.getBatchId()), 0, true);
+            n++;
+        }
+        return n;
     }
 
     private void close(WaIntakeBatch b) {
         b.setClosedAt(LocalDateTime.now());
         List<WaIntakeMessage> msgs = messages.findByBatchIdOrderByReceivedAtAscMessageIdAsc(b.getBatchId());
         long photos = msgs.stream().filter(m -> WaIntakeMessage.IMAGE.equals(m.getMsgType())).count();
+        int textLength = msgs.stream().mapToInt(m -> m.getText() == null ? 0 : m.getText().trim().length()).sum();
+        if (photos == 0 && textLength < 20) {   // e.g. "hi" to keep the 24 h window open for staff alerts: not a post
+            b.setStatus(WaIntakeBatch.SKIPPED);
+            b.setError("Short text only - not a supplier post");
+            return;
+        }
         if (photos == 0) {
             b.setStatus(WaIntakeBatch.FAILED);
             b.setError("No photos in the forwarded post");
@@ -143,44 +169,46 @@ public class DropshipIntakeService {
                 + "(the text and all photos together).", null, null);
             return;
         }
-        Optional<DropshipService.Supplier> supplier = supplierInPost(msgs);
-        if (supplier.isPresent()) {
-            assign(b, supplier.get(), photos, "found in the post");
+        b.setStatus(WaIntakeBatch.AWAITING_SUPPLIER);   // the owner chooses every time - never assigned automatically
+        b.setSupplierAskedAt(LocalDateTime.now());
+        askSupplier(b, msgs, 0, false);
+    }
+
+    /**
+     * The first photo with the post's text as caption, then the list: dropship-active suppliers, most recently used
+     * first, 9 per page + "More suppliers". page = 0-based.
+     */
+    private void askSupplier(WaIntakeBatch b, List<WaIntakeMessage> msgs, int page, boolean reminder) {
+        long photos = msgs.stream().filter(m -> WaIntakeMessage.IMAGE.equals(m.getMsgType())).count();
+        String postText = msgs.stream().map(WaIntakeMessage::getText).filter(t -> t != null && !t.isBlank()).findFirst().orElse("");
+        String snippet = postText.replaceAll("\\s+", " ").trim();
+        if (snippet.length() > 80) snippet = snippet.substring(0, 80) + "…";
+        String firstPhoto = msgs.stream().filter(m -> WaIntakeMessage.IMAGE.equals(m.getMsgType()) && m.getGcsPath() != null)
+            .map(WaIntakeMessage::getGcsPath).findFirst().orElse(null);
+
+        List<DropshipService.Supplier> all = dropship.dropshipChoices();
+        String head = (reminder ? "⏰ Reminder – still waiting: " : "📦 ") + "Post #" + b.getBatchId() + " · " + photos + " photo(s)"
+            + (snippet.isEmpty() ? "" : "\n" + snippet);
+        if (all.isEmpty()) {
+            tell(b, "text", head + "\n\nNo supplier is active for dropship. Add one in mybill (Collections → 🏭 Suppliers, "
+                + "\"Active for dropship\"), or reply: NEW SUPPLIER: Name, 10-digit WhatsApp number, pincode", null, null,
+                page == 0 ? firstPhoto : null);
             return;
         }
-        b.setStatus(WaIntakeBatch.AWAITING_SUPPLIER);
-        askSupplier(b, photos);
-    }
-
-    /** A supplier whose phone (last 10 digits) appears in the post's text or captions. */
-    Optional<DropshipService.Supplier> supplierInPost(List<WaIntakeMessage> msgs) {
-        Set<String> phones = new LinkedHashSet<>();
-        for (WaIntakeMessage m : msgs) phones.addAll(phonesIn(m.getText()));
-        if (phones.isEmpty()) return Optional.empty();
-        return dropship.suppliers().stream().filter(DropshipService.Supplier::active)
-            .filter(s -> s.phone() != null && phones.contains(last10(s.phone()))).findFirst();
-    }
-
-    static Set<String> phonesIn(String text) {
-        Set<String> out = new LinkedHashSet<>();
-        if (text == null) return out;
-        Matcher m = PHONE.matcher(text);
-        while (m.find()) out.add(m.group(1).replaceAll("\\D", ""));
-        return out;
-    }
-
-    private void askSupplier(WaIntakeBatch b, long photos) {
-        List<DropshipService.Supplier> active = dropship.suppliers().stream().filter(DropshipService.Supplier::active).toList();
+        int from = Math.min(page * PAGE_SIZE, Math.max(all.size() - 1, 0));
+        List<DropshipService.Supplier> shown = all.subList(from, Math.min(from + PAGE_SIZE, all.size()));
         List<Map<String, Object>> rows = new ArrayList<>();
-        for (DropshipService.Supplier s : active.subList(0, Math.min(active.size(), MAX_LIST_ROWS - 1))) {
-            rows.add(row(SUPPLIER_REPLY + b.getBatchId() + ":" + s.id(), s.name(),
+        for (DropshipService.Supplier s : shown) {
+            rows.add(row(b.getBatchId() + ":" + s.id(), s.name(),
                 String.join(" · ", java.util.stream.Stream.of(s.phone(), s.pincode()).filter(Objects::nonNull).toList())));
         }
-        rows.add(row(SUPPLIER_REPLY + b.getBatchId() + ":new", "➕ New supplier", "Add them, then I continue"));
-        String more = active.size() > MAX_LIST_ROWS - 1 ? "\n(Only the first " + (MAX_LIST_ROWS - 1) + " suppliers fit; "
-            + "for another one reply: SUPPLIER <name or phone>)" : "";
-        tell(b, "list", "📦 Post #" + b.getBatchId() + ": " + photos + " photo(s) received. Which supplier is it from?" + more,
-            "Choose supplier", List.of(Map.of("title", "Suppliers", "rows", rows)));
+        if (from + PAGE_SIZE < all.size()) {
+            rows.add(row(b.getBatchId() + ":MORE:" + (page + 1), "More suppliers ›",
+                (from + PAGE_SIZE + 1) + "–" + Math.min(from + 2 * PAGE_SIZE, all.size()) + " of " + all.size()));
+        }
+        tell(b, "list", head + "\n\nWhich supplier is this from?", "Choose supplier",
+            List.of(Map.of("title", page == 0 ? "Suppliers" : "Suppliers (page " + (page + 1) + ")", "rows", rows)),
+            page == 0 ? firstPhoto : null);
     }
 
     // ── the owner's answers ──────────────────────────────────────────────────
@@ -193,16 +221,17 @@ public class DropshipIntakeService {
     public Map<String, Object> ownerReply(String from, String replyId, String text) {
         String owner = digits(from);
         String t = text == null ? "" : text.trim();
-        if (replyId != null && replyId.startsWith(SUPPLIER_REPLY)) {
-            String[] parts = replyId.substring(SUPPLIER_REPLY.length()).split(":");
-            WaIntakeBatch b = parts.length == 2 ? batches.findById(parseInt(parts[0])).orElse(null) : null;
-            if (b == null || !WaIntakeBatch.AWAITING_SUPPLIER.equals(b.getStatus())) return Map.of("handled", false, "reason", "batch_not_waiting");
-            if (parts[1].equals("new")) {
-                tell(b, "text", "Send the new supplier like this:\nNEW SUPPLIER: Name, 10-digit WhatsApp number, pincode\n"
-                    + "e.g. NEW SUPPLIER: Sri Lakshmi Sarees, 9876543210, 395002", null, null);
-                return Map.of("handled", true, "action", "asked_new_supplier");
+        Matcher row = replyId == null ? null : SUPPLIER_ROW.matcher(replyId.trim());
+        if (row != null && row.matches()) {
+            WaIntakeBatch b = batches.findById(parseInt(row.group(1))).orElse(null);
+            if (b == null || !WaIntakeBatch.AWAITING_SUPPLIER.equals(b.getStatus())) {
+                return Map.of("handled", false, "reason", "batch_not_waiting");
             }
-            DropshipService.Supplier s = dropship.supplier(parseInt(parts[1])).orElse(null);
+            if (row.group(2) != null) {   // "More suppliers"
+                askSupplier(b, messages.findByBatchIdOrderByReceivedAtAscMessageIdAsc(b.getBatchId()), parseInt(row.group(3)), false);
+                return Map.of("handled", true, "action", "next_page");
+            }
+            DropshipService.Supplier s = dropship.supplier(parseInt(row.group(3))).orElse(null);
             if (s == null) return Map.of("handled", false, "reason", "unknown_supplier");
             assign(b, s, photoCount(b), "chosen by you");
             return Map.of("handled", true, "action", "supplier_set", "batch_id", b.getBatchId());
@@ -255,6 +284,11 @@ public class DropshipIntakeService {
 
     private void assign(WaIntakeBatch b, DropshipService.Supplier s, long photos, String how) {
         b.setSupplierId(s.id());
+        dropship.markUsed(s.id());
+        if (b.getCollectionId() != null) {
+            em.createNativeQuery("UPDATE boutique_collections SET supplier_id = ?1, updated_at = NOW() WHERE collection_id = ?2")
+                .setParameter(1, s.id()).setParameter(2, b.getCollectionId()).executeUpdate();
+        }
         b.setStatus(WaIntakeBatch.EXTRACTING);   // phase 3 builds the draft collection from here
         log.info("DROPSHIP_BATCH_SUPPLIER batch={} supplier={} ({})", b.getBatchId(), s.id(), how);
         tell(b, "text", "✅ Post #" + b.getBatchId() + ": " + photos + " photo(s) from " + s.name() + " (" + how + "). "
@@ -268,8 +302,14 @@ public class DropshipIntakeService {
 
     /** Queued; srisa-agent sends it to the owner after the commit (OwnerMessageNotifier). */
     private void tell(WaIntakeBatch b, String kind, String text, String buttonText, List<Map<String, Object>> sections) {
+        tell(b, kind, text, buttonText, sections, null);
+    }
+
+    /** imageUrl: sent just before the message (WhatsApp list messages can't carry an image header). */
+    private void tell(WaIntakeBatch b, String kind, String text, String buttonText, List<Map<String, Object>> sections,
+                      String imageUrl) {
         events.publishEvent(new OwnerMessage(b.getFromNumber(), "dropship:" + b.getBatchId() + ":" + UUID.randomUUID(),
-            kind, text, buttonText, sections));
+            kind, text, buttonText, sections, imageUrl, null));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -31,6 +31,7 @@ public class OwnerMessageNotifier {
         body.put("text", m.text());
         if (m.buttonText() != null) body.put("button_text", m.buttonText());
         if (m.sections() != null) body.put("sections", m.sections());
+        if (m.imageUrl() != null) body.put("image_url", m.imageUrl());
         notifier.post(body, "owner.message " + m.eventId());
     }
 }

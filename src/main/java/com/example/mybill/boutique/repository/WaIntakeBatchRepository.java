@@ -21,6 +21,9 @@ public interface WaIntakeBatchRepository extends JpaRepository<WaIntakeBatch, In
 
     List<WaIntakeBatch> findTop50ByOrderByCreatedAtDesc();
 
+    /** Posts still waiting for the owner's supplier choice, asked before `before` and not reminded yet. */
+    List<WaIntakeBatch> findByStatusAndSupplierAskedAtBeforeAndRemindedAtIsNull(String status, LocalDateTime before);
+
     /** Row lock: photos of one post arrive in parallel tasks and must get distinct numbers. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT b FROM WaIntakeBatch b WHERE b.batchId = :id")

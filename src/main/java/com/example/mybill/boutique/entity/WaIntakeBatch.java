@@ -28,6 +28,9 @@ public class WaIntakeBatch {
     @Column(name = "created_at", nullable = false, updatable = false) private LocalDateTime createdAt;
     @Column(name = "updated_at", nullable = false) private LocalDateTime updatedAt;
     @Column(name = "closed_at") private LocalDateTime closedAt;
+    /** When the owner was asked "Which supplier?" (V19) and when the 2 h reminder went out. */
+    @Column(name = "supplier_asked_at") private LocalDateTime supplierAskedAt;
+    @Column(name = "reminded_at") private LocalDateTime remindedAt;
 
     @PrePersist
     void onCreate() {
@@ -59,4 +62,8 @@ public class WaIntakeBatch {
     public void setUpdatedAtNow() { this.updatedAt = LocalDateTime.now(); }
     public LocalDateTime getClosedAt() { return closedAt; }
     public void setClosedAt(LocalDateTime closedAt) { this.closedAt = closedAt; }
+    public LocalDateTime getSupplierAskedAt() { return supplierAskedAt; }
+    public void setSupplierAskedAt(LocalDateTime v) { this.supplierAskedAt = v; }
+    public LocalDateTime getRemindedAt() { return remindedAt; }
+    public void setRemindedAt(LocalDateTime v) { this.remindedAt = v; }
 }

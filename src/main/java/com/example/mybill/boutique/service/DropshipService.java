@@ -51,7 +51,9 @@ public class DropshipService {
     /** defaultCourierSlabs / defaultCourierExtraPerPiece: copied into collections built from their forwarded posts (V18). */
     public record Supplier(int id, String name, String contactPerson, String phone, String address, String pincode,
                            String paymentDetails, int dispatchDays, String notes, boolean active,
-                           Map<String, BigDecimal> defaultCourierSlabs, BigDecimal defaultCourierExtraPerPiece) {}
+                           Map<String, BigDecimal> defaultCourierSlabs, BigDecimal defaultCourierExtraPerPiece,
+                           /** Offered in the WhatsApp "Which supplier?" list (V19); lastUsedAt orders that list. */
+                           boolean dropshipActive, java.time.LocalDateTime lastUsedAt) {}
 
     /** How a DROPSHIP collection charges courier. */
     public record Slabs(Map<String, BigDecimal> perZone, BigDecimal extraPerPiece) {}
@@ -129,7 +131,7 @@ public class DropshipService {
         List<Supplier> out = new ArrayList<>();
         for (Object r : em.createNativeQuery("""
                 SELECT supplier_id, name, contact_person, phone, address, pincode, payment_details, dispatch_days, notes, is_active,
-                       default_courier_slabs, default_courier_extra_per_piece
+                       default_courier_slabs, default_courier_extra_per_piece, dropship_active, last_used_at
                   FROM boutique_suppliers ORDER BY is_active DESC, name""").getResultList()) {
             out.add(supplier((Object[]) r));
         }
@@ -141,7 +143,7 @@ public class DropshipService {
         if (id == null) return Optional.empty();
         List<?> rows = em.createNativeQuery("""
                 SELECT supplier_id, name, contact_person, phone, address, pincode, payment_details, dispatch_days, notes, is_active,
-                       default_courier_slabs, default_courier_extra_per_piece
+                       default_courier_slabs, default_courier_extra_per_piece, dropship_active, last_used_at
                   FROM boutique_suppliers WHERE supplier_id = ?1""").setParameter(1, id).getResultList();
         return rows.isEmpty() ? Optional.empty() : Optional.of(supplier((Object[]) rows.get(0)));
     }
@@ -169,16 +171,16 @@ public class DropshipService {
         if (id == null) {
             q = em.createNativeQuery("""
                     INSERT INTO boutique_suppliers (name, contact_person, phone, address, pincode, payment_details, dispatch_days, notes, is_active,
-                                                    default_courier_slabs, default_courier_extra_per_piece)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) RETURNING supplier_id""").unwrap(NativeQuery.class);
+                                                    default_courier_slabs, default_courier_extra_per_piece, dropship_active)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) RETURNING supplier_id""").unwrap(NativeQuery.class);
         } else {
             supplier(id).orElseThrow(() -> AgentApiException.notFound("SUPPLIER_NOT_FOUND", "No supplier " + id));
             q = em.createNativeQuery("""
                     UPDATE boutique_suppliers SET name = ?1, contact_person = ?2, phone = ?3, address = ?4, pincode = ?5,
                            payment_details = ?6, dispatch_days = ?7, notes = ?8, is_active = ?9, default_courier_slabs = ?10,
-                           default_courier_extra_per_piece = ?11, updated_at = NOW()
-                     WHERE supplier_id = ?12 RETURNING supplier_id""").unwrap(NativeQuery.class);
-            q.setParameter(12, id, Integer.class);
+                           default_courier_extra_per_piece = ?11, dropship_active = ?12, updated_at = NOW()
+                     WHERE supplier_id = ?13 RETURNING supplier_id""").unwrap(NativeQuery.class);
+            q.setParameter(13, id, Integer.class);
         }
         q.setParameter(1, name, String.class)
             .setParameter(2, nullable(body.get("contact_person")), String.class)
@@ -190,9 +192,25 @@ public class DropshipService {
             .setParameter(8, nullable(body.get("notes")), String.class)
             .setParameter(9, active, Boolean.class)
             .setParameter(10, slabsJson(body.get("default_courier_slabs")), String.class)
-            .setParameter(11, money(body.get("default_courier_extra_per_piece"), "Extra courier charge per piece"), BigDecimal.class);
+            .setParameter(11, money(body.get("default_courier_extra_per_piece"), "Extra courier charge per piece"), BigDecimal.class)
+            .setParameter(12, !(body.get("dropship_active") instanceof Boolean da) || da, Boolean.class);
         int saved = ((Number) q.getSingleResult()).intValue();
         return supplier(saved).orElseThrow();
+    }
+
+    /** Active suppliers offered for a forwarded post: active and dropship_active, most recently used first. */
+    @Transactional(readOnly = true)
+    public List<Supplier> dropshipChoices() {
+        return suppliers().stream().filter(s -> s.active() && s.dropshipActive())
+            .sorted(Comparator.comparing(Supplier::lastUsedAt, Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(Supplier::name, String.CASE_INSENSITIVE_ORDER))
+            .toList();
+    }
+
+    @Transactional
+    public void markUsed(int supplierId) {
+        em.createNativeQuery("UPDATE boutique_suppliers SET last_used_at = NOW() WHERE supplier_id = ?1")
+            .setParameter(1, supplierId).executeUpdate();
     }
 
     @Transactional
@@ -304,7 +322,8 @@ public class DropshipService {
         BigDecimal extra = a[11] == null ? null : new BigDecimal(a[11].toString());
         return new Supplier(((Number) a[0]).intValue(), (String) a[1], (String) a[2], (String) a[3], (String) a[4],
             (String) a[5], (String) a[6], a[7] == null ? 2 : ((Number) a[7]).intValue(), (String) a[8], !Boolean.FALSE.equals(a[9]),
-            parseSlabs((String) a[10], null).perZone(), extra);
+            parseSlabs((String) a[10], null).perZone(), extra, !Boolean.FALSE.equals(a[12]),
+            a[13] instanceof java.sql.Timestamp ts ? ts.toLocalDateTime() : a[13] instanceof java.time.LocalDateTime l ? l : null);
     }
 
     /** A non-negative amount from the UI body, or null when empty. */
