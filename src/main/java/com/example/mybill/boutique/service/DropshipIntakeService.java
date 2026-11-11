@@ -371,7 +371,7 @@ public class DropshipIntakeService {
         batchOfCollection(collectionId).ifPresent(b -> {
             String code = collectionCode(collectionId);
             String text = r.permalinks().isEmpty()
-                ? "⚠️ " + code + " is approved (customers can buy it on WhatsApp) but was NOT posted on Instagram: " + r.error()
+                ? "⚠️ " + code + " was NOT posted on Instagram: " + r.error()
                 : "📸 " + code + " is on Instagram @" + r.account() + ":\n" + String.join("\n", r.permalinks())
                     + (r.catalogItems() > 0 ? "\n🛍️ " + r.catalogItems() + " colours added to the Meta catalog" : "")
                     + (r.error() == null ? "" : "\n⚠️ " + r.error());
