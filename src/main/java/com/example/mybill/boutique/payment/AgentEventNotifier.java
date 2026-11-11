@@ -39,7 +39,8 @@ public class AgentEventNotifier {
 
     @Autowired private ObjectMapper objectMapper;
 
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    // srisa-agent scales to zero: a cold start can take 10-20 s before it accepts the connection.
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(25)).build();
 
     @Async
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -84,7 +85,7 @@ public class AgentEventNotifier {
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
                 HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(40))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)));
                 if (authEnabled) request.header("Authorization", "Bearer " + idToken());
