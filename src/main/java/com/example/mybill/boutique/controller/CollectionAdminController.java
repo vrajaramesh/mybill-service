@@ -72,6 +72,44 @@ public class CollectionAdminController {
         return collections.replaceItems(id, items);
     }
 
+    @Autowired private com.example.mybill.boutique.service.DropshipApprovalService approval;
+    @Autowired private com.example.mybill.multitenancy.JwtUtil jwtUtil;
+
+    /** Dropship: ACTIVE (customers can buy it) - same as the owner's WhatsApp Approve. */
+    @PostMapping("/{id}/approve")
+    public Map<String, Object> approve(@PathVariable int id, @RequestHeader(value = "Authorization", required = false) String auth) {
+        requireFirm();
+        return approval.approve(id, user(auth));
+    }
+
+    @PostMapping("/{id}/archive")
+    public Map<String, Object> archive(@PathVariable int id, @RequestHeader(value = "Authorization", required = false) String auth) {
+        requireFirm();
+        return approval.archive(id, user(auth));
+    }
+
+    /** One dropship variant: {status: AVAILABLE|SOLD_OUT, price}. */
+    @PatchMapping("/{id}/variants/{code}")
+    public Map<String, Object> variant(@PathVariable int id, @PathVariable String code, @RequestBody Map<String, Object> body) {
+        requireFirm();
+        return approval.updateVariant(id, code, body);
+    }
+
+    /** Same selling price for every variant: {price}. */
+    @PostMapping("/{id}/price")
+    public Map<String, Object> priceForAll(@PathVariable int id, @RequestBody Map<String, Object> body) {
+        requireFirm();
+        return approval.setPriceForAll(id, body.get("price"));
+    }
+
+    private String user(String auth) {
+        try {
+            return auth != null && auth.startsWith("Bearer ") ? jwtUtil.extractClaims(auth.substring(7)).getSubject() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     @DeleteMapping("/{id}")
     public Map<String, Object> delete(@PathVariable int id) {
         requireFirm();

@@ -56,7 +56,15 @@ public class CollectionService {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Object r : em.createNativeQuery("""
                 SELECT c.collection_id, c.code, c.name, c.collection_type, c.is_active, c.cover_image_url,
-                       (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id), c.status
+                       (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id), c.status,
+                       (SELECT s.name FROM boutique_suppliers s WHERE s.supplier_id = c.supplier_id),
+                       (SELECT MIN(p.selling_price) FROM boutique_collection_items i JOIN products p ON p.product_id = i.product_id
+                         WHERE i.collection_id = c.collection_id),
+                       (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id
+                           AND COALESCE(i.status, 'AVAILABLE') = 'AVAILABLE'),
+                       (SELECT l.permalink FROM marketing_links l WHERE l.collection_code = c.code AND l.permalink IS NOT NULL
+                         ORDER BY l.active DESC, l.created_at DESC LIMIT 1),
+                       c.source
                   FROM boutique_collections c ORDER BY c.created_at DESC, c.collection_id DESC""").getResultList()) {
             Object[] a = (Object[]) r;
             Map<String, Object> m = new LinkedHashMap<>();
@@ -68,6 +76,11 @@ public class CollectionService {
             m.put("cover_image_url", a[5]);
             m.put("item_count", ((Number) a[6]).intValue());
             m.put("status", a[7]);
+            m.put("supplier_name", a[8]);
+            m.put("price", a[9]);
+            m.put("available_count", a[10] == null ? 0 : ((Number) a[10]).intValue());
+            m.put("instagram_url", a[11]);
+            m.put("source", a[12]);
             out.add(m);
         }
         return out;
@@ -115,6 +128,10 @@ public class CollectionService {
         Map<String, Object> pricing = isWholesale ? wholesalePricing(items) : null;
         if (isWholesale) out.put("wholesale", pricing);
         if (staff) {
+            List<?> ig = em.createNativeQuery("""
+                    SELECT permalink FROM marketing_links WHERE collection_code = ?1 AND permalink IS NOT NULL
+                     ORDER BY active DESC, created_at DESC""").setParameter(1, c[1]).getResultList();
+            out.put("instagram_urls", ig);
             out.put("supplier_id", c[8]);
             out.put("supplier_name", supplier.map(DropshipService.Supplier::name).orElse(null));
             out.put("courier_slabs", slabs.perZone());
