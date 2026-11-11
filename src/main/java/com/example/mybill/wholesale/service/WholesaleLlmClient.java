@@ -34,7 +34,7 @@ public class WholesaleLlmClient {
     @Value("${wholesale.ai.api-url:${anthropic.api.url:https://api.anthropic.com/v1/messages}}")
     private String apiUrl;
 
-    @Value("${wholesale.ai.model:claude-sonnet-5-5}")
+    @Value("${wholesale.ai.model:claude-haiku-5-5}")
     private String model;
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(20)).build();
