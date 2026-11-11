@@ -243,6 +243,10 @@ public class DropshipIntakeService {
             assign(b, s, photoCount(b), "chosen by you");
             return Map.of("handled", true, "action", "supplier_set", "batch_id", b.getBatchId());
         }
+        Matcher retry = Pattern.compile("(?i)^retry\\s*#?(\\d+)$").matcher(t);
+        if (retry.matches()) {
+            return retry(parseInt(retry.group(1)), owner);
+        }
         if (t.equalsIgnoreCase("done")) {
             return Map.of("handled", true, "action", "closed", "result", processBatches(owner));
         }
@@ -287,6 +291,24 @@ public class DropshipIntakeService {
             return Map.of("handled", true, "action", "supplier_ambiguous");
         }
         return Map.of("handled", false, "reason", "not_an_owner_command");
+    }
+
+    /** Run the AI step again for a FAILED post that already has its supplier (e.g. after the AI service was down). */
+    @Transactional
+    public Map<String, Object> retry(int batchId, String owner) {
+        WaIntakeBatch b = batches.findById(batchId).orElse(null);
+        if (b == null || (owner != null && !owner.isBlank() && !digits(owner).equals(b.getFromNumber()))) {
+            return Map.of("handled", false, "reason", "unknown_batch");
+        }
+        if (!WaIntakeBatch.FAILED.equals(b.getStatus()) || b.getSupplierId() == null || b.getCollectionId() != null) {
+            tell(b, "text", "Post #" + batchId + " can't be retried (it is "
+                + b.getStatus().toLowerCase(Locale.ROOT).replace('_', ' ') + ").", null, null);
+            return Map.of("handled", true, "action", "not_retryable");
+        }
+        b.setStatus(WaIntakeBatch.EXTRACTING);
+        b.setError(null);
+        tell(b, "text", "🔄 Post #" + batchId + ": trying again…", null, null);
+        return Map.of("handled", true, "action", "supplier_set", "batch_id", batchId);   // the agent then runs the extraction
     }
 
     private void assign(WaIntakeBatch b, DropshipService.Supplier s, long photos, String how) {

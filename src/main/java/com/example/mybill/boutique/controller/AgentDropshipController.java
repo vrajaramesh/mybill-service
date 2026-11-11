@@ -82,6 +82,13 @@ public class AgentDropshipController {
         return intake.processBatches(body == null ? null : str(body.get("force_from")));
     }
 
+    /** Re-run a FAILED post (owner command RETRY n). Body {batch_id}. */
+    @PostMapping("/retry")
+    public Map<String, Object> retry(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return intake.retry(Integer.parseInt(String.valueOf(body.get("batch_id"))), null);
+    }
+
     /** The owner tapped a list row / button or sent a command ("done", "NEW SUPPLIER: …"). {from, reply_id, text}. */
     @PostMapping("/owner-reply")
     public Map<String, Object> ownerReply(@RequestBody Map<String, Object> body) {

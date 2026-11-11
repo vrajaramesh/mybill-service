@@ -59,7 +59,6 @@ jobs:
             SPRING_DATASOURCE_PASSWORD=npg_xRC73OdBaqLH
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
             GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
             RAZORPAY_KEY_ID=${{ secrets.RAZORPAY_KEY_ID }}
             RAZORPAY_KEY_SECRET=${{ secrets.RAZORPAY_KEY_SECRET }}
@@ -77,6 +76,9 @@ jobs:
             DELHIVERY_BASE_URL=${{ vars.DELHIVERY_BASE_URL || 'https://track.delhivery.com' }}
             DELHIVERY_PICKUP_LOCATION=${{ vars.DELHIVERY_PICKUP_LOCATION }}
             DELHIVERY_ORIGIN_PINCODE=${{ vars.DELHIVERY_ORIGIN_PINCODE }}
+          # The Anthropic key is shared with srisa-agent (Secret Manager), so both bill to one account.
+          secrets: |
+            ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest
           flags: >
             --memory=4Gi
             --cpu=2

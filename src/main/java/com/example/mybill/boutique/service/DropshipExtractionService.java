@@ -423,7 +423,18 @@ public class DropshipExtractionService {
         if (b == null || !WaIntakeBatch.EXTRACTING.equals(b.getStatus())) return;
         b.setStatus(WaIntakeBatch.FAILED);
         b.setError(clip(reason, 1000));
-        tell(b, "⚠️ Post #" + batchId + ": I couldn't build the collection – " + clip(reason, 300));
+        tell(b, "⚠️ Post #" + batchId + ": I couldn't build the collection – " + plain(reason)
+            + "\nReply *RETRY " + batchId + "* to try again (no need to forward it again).");
+    }
+
+    /** The owner sees a short reason, not the raw API error (that stays in the batch's error column). */
+    static String plain(String reason) {
+        String r = reason == null ? "" : reason;
+        if (r.contains("credit balance")) return "the AI service has no credit left (Anthropic billing).";
+        if (r.contains("ANTHROPIC_API_KEY")) return "the AI service is not set up (API key missing).";
+        if (r.matches("(?s).*Claude API (429|5\\d\\d).*") || r.contains("Claude API call failed")) return "the AI service is busy - try again in a few minutes.";
+        if (r.contains("Claude API")) return "the AI service rejected the request.";
+        return clip(r, 300);
     }
 
     private void tell(WaIntakeBatch b, String text) {
