@@ -82,6 +82,19 @@ public class AgentDropshipController {
         return intake.processBatches(body == null ? null : str(body.get("force_from")));
     }
 
+    @Autowired private com.example.mybill.boutique.service.DropshipPublishService publisher;
+
+    /** Post an approved collection on the dropship Instagram account + Meta catalog (20-90 s). Body {collection_id}. */
+    @PostMapping("/publish")
+    public Map<String, Object> publish(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        int id = Integer.parseInt(String.valueOf(body.get("collection_id")));
+        var r = publisher.publish(id, Boolean.TRUE.equals(body.get("repost")));
+        intake.tellPublishedTx(id, r);
+        return Map.of("account", r.account(), "permalinks", r.permalinks(), "catalog_items", r.catalogItems(),
+            "error", r.error() == null ? "" : r.error());
+    }
+
     /** Re-run a FAILED post (owner command RETRY n). Body {batch_id}. */
     @PostMapping("/retry")
     public Map<String, Object> retry(@RequestBody Map<String, Object> body) {

@@ -76,10 +76,21 @@ public class CollectionAdminController {
     @Autowired private com.example.mybill.multitenancy.JwtUtil jwtUtil;
 
     /** Dropship: ACTIVE (customers can buy it) - same as the owner's WhatsApp Approve. */
+    @Autowired private com.example.mybill.boutique.service.DropshipPublishService publisher;
+    @Autowired private com.example.mybill.boutique.service.DropshipIntakeService intake;
+
+    /** Approve and post: ACTIVE, then Instagram (dropship account) + Meta catalog. ?repost=true posts again. */
     @PostMapping("/{id}/approve")
-    public Map<String, Object> approve(@PathVariable int id, @RequestHeader(value = "Authorization", required = false) String auth) {
+    public Map<String, Object> approve(@PathVariable int id, @RequestParam(defaultValue = "false") boolean repost,
+                                       @RequestHeader(value = "Authorization", required = false) String auth) {
         requireFirm();
-        return approval.approve(id, user(auth));
+        approval.approve(id, user(auth));
+        var r = publisher.publish(id, repost);
+        intake.tellPublishedTx(id, r);
+        Map<String, Object> out = new LinkedHashMap<>(collections.get(String.valueOf(id), true));
+        out.put("published", Map.of("account", r.account(), "permalinks", r.permalinks(), "catalog_items", r.catalogItems(),
+            "error", r.error() == null ? "" : r.error()));
+        return out;
     }
 
     @PostMapping("/{id}/archive")

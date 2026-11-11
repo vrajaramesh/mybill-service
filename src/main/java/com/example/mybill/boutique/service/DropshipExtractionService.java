@@ -316,7 +316,8 @@ public class DropshipExtractionService {
             + " each (supplier ₹" + d.supplierPrice().toPlainString() + (shippingExtra ? " + shipping" : "") + ")"
             + (d.skipped().isEmpty() ? "" : "\nSkipped " + d.skipped().size() + " duplicate photo(s)")
             + (flagged.isEmpty() ? "" : "\n⚠️ Check: " + String.join(", ", flagged))
-            + "\nIt's a DRAFT in mybill → Collections (" + code + ") – not sold yet.";
+            + "\nApprove to post it on Instagram and sell it, Edit price to change ₹" + d.sellingPrice().toPlainString()
+            + ", or Skip.";
         List<StampItem> stamps = new ArrayList<>();
         for (Map<String, Object> item : items) {
             stamps.add(new StampItem((String) item.get("item_code"), String.format("%02d", (Integer) item.get("variant_no")),
@@ -378,8 +379,10 @@ public class DropshipExtractionService {
                 log.warn("Could not record the collage URL: {}", e.toString());
             }
         }
+        int collectionId = ((Number) saved.result().get("collection_id")).intValue();
+        String body = saved.message().length() > 1000 ? saved.message().substring(0, 1000) : saved.message();
         events.publishEvent(new DropshipIntakeService.OwnerMessage(b.getFromNumber(), "dropship:" + b.getBatchId() + ":" + UUID.randomUUID(),
-            "text", saved.message(), null, null, collageUrl, null));
+            "buttons", body, null, null, collageUrl, null, DropshipIntakeService.approvalButtons(collectionId)));
     }
 
     private int insertProduct(String name, String description, String category, BigDecimal cost, BigDecimal price,

@@ -50,6 +50,16 @@ public class DropshipIntakeService {
     @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
 
     @Value("${dropship.intake.idle-seconds:60}") private int idleSeconds;
+    @Autowired @org.springframework.context.annotation.Lazy private DropshipApprovalService approval;
+
+    /** Button ids on "Draft ready": approve / edit price / skip a draft collection. */
+    public static final String APPROVE = "dsok:", EDIT_PRICE = "dsprice:", SKIP = "dsskip:";
+
+    public static List<Map<String, String>> approvalButtons(int collectionId) {
+        return List.of(Map.of("id", APPROVE + collectionId, "title", "✅ Approve"),
+            Map.of("id", EDIT_PRICE + collectionId, "title", "✏️ Edit price"),
+            Map.of("id", SKIP + collectionId, "title", "⏭️ Skip"));
+    }
 
     /** One message from srisa-agent. image = the photo bytes (already downloaded from WhatsApp). */
     public record Incoming(String waMessageId, String from, String type, String text, String mediaId, String mimeType,
@@ -243,6 +253,13 @@ public class DropshipIntakeService {
             assign(b, s, photoCount(b), "chosen by you");
             return Map.of("handled", true, "action", "supplier_set", "batch_id", b.getBatchId());
         }
+        if (replyId != null && (replyId.startsWith(APPROVE) || replyId.startsWith(EDIT_PRICE) || replyId.startsWith(SKIP))) {
+            return approvalTap(owner, replyId);
+        }
+        Matcher priceCmd = Pattern.compile("(?i)^price\\s+(?:([A-Z0-9-]+)\\s+)?₹?\\s*(\\d{2,6})(?:\\.\\d{1,2})?$").matcher(t);
+        if (priceCmd.matches()) {
+            return priceCommand(owner, priceCmd.group(1), priceCmd.group(2));
+        }
         Matcher retry = Pattern.compile("(?i)^retry\\s*#?(\\d+)$").matcher(t);
         if (retry.matches()) {
             return retry(parseInt(retry.group(1)), owner);
@@ -291,6 +308,76 @@ public class DropshipIntakeService {
             return Map.of("handled", true, "action", "supplier_ambiguous");
         }
         return Map.of("handled", false, "reason", "not_an_owner_command");
+    }
+
+    /** Approve (→ the agent runs the Instagram / catalog publishing), Edit price (→ asks for PRICE n) or Skip (archive). */
+    private Map<String, Object> approvalTap(String owner, String replyId) {
+        int collectionId = parseInt(replyId.substring(replyId.indexOf(':') + 1));
+        WaIntakeBatch b = batchOfCollection(collectionId).orElse(null);
+        if (b == null) return Map.of("handled", false, "reason", "unknown_collection");
+        String code = collectionCode(collectionId);
+        if (replyId.startsWith(EDIT_PRICE)) {
+            tell(b, "text", "Send the new price for every colour of " + code + ", e.g.\n*PRICE 1799*", null, null);
+            return Map.of("handled", true, "action", "asked_price");
+        }
+        if (replyId.startsWith(SKIP)) {
+            approval.archive(collectionId, "WhatsApp");
+            return Map.of("handled", true, "action", "skipped");
+        }
+        approval.approve(collectionId, "WhatsApp");
+        tell(b, "text", "📤 Posting " + code + " to Instagram…", null, null);
+        return Map.of("handled", true, "action", "publish", "collection_id", collectionId);
+    }
+
+    /** PRICE 1799 (the owner's latest draft) or PRICE KSS1211 1799: the same price for every colour. */
+    private Map<String, Object> priceCommand(String owner, String code, String amount) {
+        Integer collectionId = null;
+        if (code != null) {
+            List<?> ids = em.createNativeQuery("SELECT collection_id FROM boutique_collections WHERE UPPER(code) = UPPER(?1)")
+                .setParameter(1, code).getResultList();
+            if (!ids.isEmpty()) collectionId = ((Number) ids.get(0)).intValue();
+        } else {
+            collectionId = batches.findTop50ByOrderByCreatedAtDesc().stream()
+                .filter(x -> owner.equals(x.getFromNumber()) && x.getCollectionId() != null
+                    && (WaIntakeBatch.AWAITING_APPROVAL.equals(x.getStatus()) || WaIntakeBatch.APPROVED.equals(x.getStatus())))
+                .map(WaIntakeBatch::getCollectionId).findFirst().orElse(null);
+        }
+        if (collectionId == null) return Map.of("handled", false, "reason", "no_collection");
+        approval.setPriceForAll(collectionId, amount);
+        int cid = collectionId;
+        batchOfCollection(cid).ifPresent(b -> events.publishEvent(new OwnerMessage(b.getFromNumber(),
+            "dropship:" + b.getBatchId() + ":" + UUID.randomUUID(), "buttons",
+            "✏️ " + collectionCode(cid) + ": every colour is now ₹" + amount + ". Approve to post it on Instagram and sell it.",
+            null, null, null, null, approvalButtons(cid))));
+        return Map.of("handled", true, "action", "price_set", "collection_id", cid);
+    }
+
+    private Optional<WaIntakeBatch> batchOfCollection(int collectionId) {
+        return batches.findTop50ByOrderByCreatedAtDesc().stream().filter(x -> Objects.equals(x.getCollectionId(), collectionId)).findFirst();
+    }
+
+    private String collectionCode(int collectionId) {
+        List<?> r = em.createNativeQuery("SELECT code FROM boutique_collections WHERE collection_id = ?1").setParameter(1, collectionId).getResultList();
+        return r.isEmpty() ? "#" + collectionId : String.valueOf(r.get(0));
+    }
+
+    @Transactional
+    public void tellPublishedTx(int collectionId, DropshipPublishService.Result r) {
+        tellPublished(collectionId, r);
+    }
+
+    /** Tell the owner what the publishing did (called after DropshipPublishService). */
+    public void tellPublished(int collectionId, DropshipPublishService.Result r) {
+        batchOfCollection(collectionId).ifPresent(b -> {
+            String code = collectionCode(collectionId);
+            String text = r.permalinks().isEmpty()
+                ? "⚠️ " + code + " is approved (customers can buy it on WhatsApp) but was NOT posted on Instagram: " + r.error()
+                : "📸 " + code + " is on Instagram @" + r.account() + ":\n" + String.join("\n", r.permalinks())
+                    + (r.catalogItems() > 0 ? "\n🛍️ " + r.catalogItems() + " colours added to the Meta catalog" : "")
+                    + (r.error() == null ? "" : "\n⚠️ " + r.error());
+            tell(b, "text", text, null, null);
+            if (!r.permalinks().isEmpty() && WaIntakeBatch.APPROVED.equals(b.getStatus())) b.setStatus(WaIntakeBatch.PUBLISHED);
+        });
     }
 
     /** Run the AI step again for a FAILED post that already has its supplier (e.g. after the AI service was down). */
