@@ -4,6 +4,7 @@ import com.example.mybill.boutique.dto.PaymentInfo;
 import com.example.mybill.boutique.entity.*;
 import com.example.mybill.boutique.service.AgentCatalogService;
 import com.example.mybill.boutique.service.AgentOrderService;
+import com.example.mybill.boutique.service.DropshipService;
 import com.example.mybill.boutique.exception.AgentApiException;
 import com.example.mybill.boutique.repository.*;
 import com.example.mybill.multitenancy.TenantContext;
@@ -50,6 +51,7 @@ public class PaymentLinkService {
     @Autowired private ApplicationEventPublisher events;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private com.example.mybill.boutique.service.GoodsService goodsService;
+    @Autowired @org.springframework.context.annotation.Lazy private com.example.mybill.boutique.service.DropshipService dropshipService;
 
     @Value("${boutique.payment.link-expiry-hours:24}") private int expiryHours;
     @Value("${boutique.payment.callback-url:}") private String callbackUrl;
@@ -316,7 +318,14 @@ public class PaymentLinkService {
             String.join(", ", java.util.stream.Stream.of(order.getDeliveryName(), order.getDeliveryAddressLine1(),
                 order.getDeliveryAddressLine2(), order.getDeliveryCity(), order.getDeliveryState() + " " + order.getDeliveryPincode())
                 .filter(v -> v != null && !v.isBlank()).toList()),
-            String.valueOf(TenantContext.getCurrentTenant()));
+            String.valueOf(TenantContext.getCurrentTenant()),
+            order.isDropship() ? order.getSupplierName() : null,
+            order.isDropship() ? supplierPhone(order) : null);
+    }
+
+    private String supplierPhone(BoutiqueOrder order) {
+        return order.getSupplierId() == null ? null
+            : dropshipService.supplier(order.getSupplierId()).map(DropshipService.Supplier::phone).orElse(null);
     }
 
     /** "MCS-1B Blue check – 2.5 m; KUR-3A – size M × 2" for the staff dispatch alert. */

@@ -25,6 +25,23 @@ public class AgentDropshipController {
     @Autowired private com.example.mybill.boutique.service.OwnerNumberService ownerNumbers;
     @Autowired private com.example.mybill.boutique.service.DropshipExtractionService extraction;
 
+    @Autowired private com.example.mybill.boutique.service.DropshipCustomerService customers;
+
+    /** A customer wants to buy a dropship variant: ask the owner(s) Yes / No. {item_code, conversation_id, customer_name, customer_phone}. */
+    @PostMapping("/availability")
+    public Map<String, Object> availability(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return customers.askAvailability(str(body.get("item_code")), str(body.get("conversation_id")),
+            str(body.get("customer_name")), str(body.get("customer_phone")));
+    }
+
+    /** The owner said the variant is not available: SOLD_OUT. */
+    @PostMapping("/items/{code}/sold-out")
+    public Map<String, Object> soldOut(@PathVariable String code) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return customers.markSoldOut(code);
+    }
+
     /** Build the DRAFT collection of a post whose supplier is chosen (AI extraction, 20-90 s). Body {batch_id}. */
     @PostMapping("/extract")
     public Map<String, Object> extract(@RequestBody Map<String, Object> body) {

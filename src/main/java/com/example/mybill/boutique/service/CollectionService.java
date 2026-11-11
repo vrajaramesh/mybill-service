@@ -104,6 +104,12 @@ public class CollectionService {
         DropshipService.Slabs slabs = dropship.parseSlabs((String) c[9], c[10] == null ? null : new BigDecimal(c[10].toString()));
         if (isDropship) {
             out.put("dropship", true);
+            // a post forwarded on WhatsApp has a collage of all its colours (phase 4)
+            List<?> collage = em.createNativeQuery("""
+                    SELECT CAST(extracted AS jsonb) ->> 'collage_url' FROM wa_intake_batch
+                     WHERE collection_id = ?1 AND extracted IS NOT NULL ORDER BY batch_id DESC LIMIT 1""")
+                .setParameter(1, id).getResultList();
+            if (!collage.isEmpty() && collage.get(0) != null) out.put("collage_url", collage.get(0));
             out.put("dispatch_days", supplier.map(DropshipService.Supplier::dispatchDays).orElse(null));
         }
         Map<String, Object> pricing = isWholesale ? wholesalePricing(items) : null;

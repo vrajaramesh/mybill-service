@@ -57,7 +57,14 @@ public class DropshipIntakeService {
 
     /** Sent to the owner's WhatsApp by srisa-agent after the DB commit (event "owner.message"). */
     public record OwnerMessage(String to, String eventId, String kind, String text, String buttonText,
-                               List<Map<String, Object>> sections, String imageUrl, String imageCaption) {}
+                               List<Map<String, Object>> sections, String imageUrl, String imageCaption,
+                               /** kind "buttons": up to 3 reply buttons [{id, title}]. */
+                               List<Map<String, String>> buttons) {
+        public OwnerMessage(String to, String eventId, String kind, String text, String buttonText,
+                            List<Map<String, Object>> sections, String imageUrl, String imageCaption) {
+            this(to, eventId, kind, text, buttonText, sections, imageUrl, imageCaption, null);
+        }
+    }
 
     // ── intake ───────────────────────────────────────────────────────────────
 
