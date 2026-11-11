@@ -61,6 +61,9 @@ public class DropshipExtractionService {
     @Autowired private ApplicationEventPublisher events;
     @Autowired private TransactionTemplate tx;
     @Autowired private ObjectMapper json;
+    @Autowired private ImageStampService stamper;
+    @Autowired private CollageService collages;
+    @Autowired private com.example.mybill.service.GcsUploadService gcs;
     @PersistenceContext private EntityManager em;
 
     @Value("${dropship.pricing.margin:1.30}") private BigDecimal margin;
@@ -94,9 +97,12 @@ public class DropshipExtractionService {
         if (snap == null) return Map.of("status", "skipped", "reason", "not_extracting");
         try {
             Draft draft = build(snap);
-            Map<String, Object> result = tx.execute(s -> save(snap, draft));
-            log.info("DROPSHIP_DRAFT batch={} result={}", batchId, result);
-            return result;
+            Saved saved = tx.execute(s -> save(snap, draft));
+            if (saved.items().isEmpty()) return saved.result();   // a parallel run already built it
+            Images images = images(saved);                        // stamped photos + collage (no transaction)
+            tx.executeWithoutResult(s -> finish(saved, images));
+            log.info("DROPSHIP_DRAFT batch={} result={}", batchId, saved.result());
+            return saved.result();
         } catch (Exception e) {
             log.error("DROPSHIP_EXTRACTION_FAILED batch={}: {}", batchId, e.toString(), e);
             String reason = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -225,10 +231,16 @@ public class DropshipExtractionService {
 
     // ── 3. write (one transaction) ───────────────────────────────────────────
 
-    private Map<String, Object> save(Snapshot snap, Draft d) {
+    /** One variant to stamp: its code and original photo. */
+    private record StampItem(String itemCode, String label, String originalUrl) {}
+
+    private record Saved(Map<String, Object> result, int batchId, String code, String title, String priceLine,
+                         List<StampItem> items, String message) {}
+
+    private Saved save(Snapshot snap, Draft d) {
         WaIntakeBatch b = em.find(WaIntakeBatch.class, snap.batch().getBatchId(), LockModeType.PESSIMISTIC_WRITE);
         if (!WaIntakeBatch.EXTRACTING.equals(b.getStatus()) || b.getCollectionId() != null) {
-            return Map.of("status", "skipped", "reason", "already_done");   // a parallel run won
+            return new Saved(Map.of("status", "skipped", "reason", "already_done"), b.getBatchId(), null, null, null, List.of(), null);
         }
         JsonNode info = d.info();
         String title = clip(blankOr(info.path("title").asText(null), "Dropship collection"), 120);
@@ -303,9 +315,69 @@ public class DropshipExtractionService {
             + (d.skipped().isEmpty() ? "" : "\nSkipped " + d.skipped().size() + " duplicate photo(s)")
             + (flagged.isEmpty() ? "" : "\n⚠️ Check: " + String.join(", ", flagged))
             + "\nIt's a DRAFT in mybill → Collections (" + code + ") – not sold yet.";
-        tell(b, msg);
-        return Map.of("status", "draft", "collection_id", collectionId, "code", code, "variants", d.variants().size(),
-            "skipped", d.skipped().size(), "selling_price", d.sellingPrice());
+        List<StampItem> stamps = new ArrayList<>();
+        for (Map<String, Object> item : items) {
+            stamps.add(new StampItem((String) item.get("item_code"), String.format("%02d", (Integer) item.get("variant_no")),
+                (String) item.get("original_image_path")));
+        }
+        Map<String, Object> result = Map.of("status", "draft", "collection_id", collectionId, "code", code,
+            "variants", d.variants().size(), "skipped", d.skipped().size(), "selling_price", d.sellingPrice());
+        return new Saved(result, b.getBatchId(), code, title, "₹" + d.sellingPrice().toPlainString() + " each"
+            + (shippingExtra ? " + shipping" : ""), stamps, msg);
+    }
+
+    // ── 4. stamped photos and the collage (no transaction), then finish ──────
+
+    /** stamped: item code -> stamped photo URL; collageUrl null if the collage failed. */
+    private record Images(Map<String, String> stamped, String collageUrl) {}
+
+    /** Stamps every variant's code on its photo (dropship/{code}/stamped/{itemCode}.jpg) and builds the collage
+     *  (dropship/{code}/collage.jpg). A failed stamp keeps the original photo on that item. */
+    private Images images(Saved saved) {
+        Map<String, String> stampedUrls = new HashMap<>();
+        List<CollageService.Tile> tiles = new ArrayList<>();
+        for (StampItem it : saved.items()) {
+            byte[] original = download(it.originalUrl());
+            tiles.add(new CollageService.Tile(it.label(), original));
+            try {
+                byte[] stamped = stamper.stampCode(original, it.itemCode());
+                stampedUrls.put(it.itemCode(), gcs.uploadToPath(stamped, "image/jpeg",
+                    "dropship/" + saved.code() + "/stamped/" + it.itemCode() + ".jpg"));
+            } catch (Exception e) {
+                log.warn("DROPSHIP_STAMP_FAILED item={}: {}", it.itemCode(), e.toString());
+            }
+        }
+        String collage = null;
+        try {
+            collage = gcs.uploadToPath(collages.build(saved.title(), saved.priceLine(), tiles), "image/jpeg",
+                "dropship/" + saved.code() + "/collage.jpg");
+        } catch (Exception e) {
+            log.warn("DROPSHIP_COLLAGE_FAILED code={}: {}", saved.code(), e.toString());
+        }
+        return new Images(stampedUrls, collage);
+    }
+
+    /** Items show the stamped photo (the original stays in original_image_path); the owner gets the collage + summary. */
+    private void finish(Saved saved, Images images) {
+        String collageUrl = images.collageUrl();
+        for (StampItem it : saved.items()) {
+            String url = images.stamped().get(it.itemCode());
+            if (url == null) continue;
+            em.createNativeQuery("UPDATE boutique_collection_items SET stamped_image_url = ?1, image_url = ?1 WHERE UPPER(item_code) = UPPER(?2)")
+                .setParameter(1, url).setParameter(2, it.itemCode()).executeUpdate();
+        }
+        WaIntakeBatch b = em.find(WaIntakeBatch.class, saved.batchId(), LockModeType.PESSIMISTIC_WRITE);
+        if (collageUrl != null) {
+            try {
+                Map<String, Object> extracted = json.readValue(b.getExtracted(), new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                extracted.put("collage_url", collageUrl);
+                b.setExtracted(toJson(extracted));
+            } catch (Exception e) {
+                log.warn("Could not record the collage URL: {}", e.toString());
+            }
+        }
+        events.publishEvent(new DropshipIntakeService.OwnerMessage(b.getFromNumber(), "dropship:" + b.getBatchId() + ":" + UUID.randomUUID(),
+            "text", saved.message(), null, null, collageUrl, null));
     }
 
     private int insertProduct(String name, String description, String category, BigDecimal cost, BigDecimal price,
