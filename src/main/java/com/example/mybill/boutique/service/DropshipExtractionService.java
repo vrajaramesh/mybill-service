@@ -89,7 +89,8 @@ public class DropshipExtractionService {
         [{"index": 1, "primary_colour": "main body colour in simple words, e.g. maroon",
           "secondary_desc": "short description of contrast parts, e.g. red floral Kalamkari blouse, gold zari border",
           "has_watermark_or_phone": true if a watermark, logo, shop name or phone number is visible,
-          "quality_ok": false if blurry, very dark, cut off or a collage}]""";
+          "quality_ok": false only if blurry, very dark, badly cut off, or several DIFFERENT products in one picture.
+                        A model wearing it next to the folded saree / fabric (two views of the SAME product) is normal: true}]""";
 
     /** Runs the extraction for one batch (idempotent: only an EXTRACTING batch without a collection is processed). */
     public Map<String, Object> extract(int batchId) {
