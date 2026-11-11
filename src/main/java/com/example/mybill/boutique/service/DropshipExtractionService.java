@@ -246,6 +246,7 @@ public class DropshipExtractionService {
         String title = clip(blankOr(info.path("title").asText(null), "Dropship collection"), 120);
         String code = freeCode(prefix(info.path("code_prefix").asText(null)) + LocalDate.now(IST).format(DateTimeFormatter.ofPattern("ddMM")));
         String category = clip(blankOr(info.path("category").asText(null), "saree"), 50);
+        String productCategory = existingCategory(category);   // products.category must be one of Product categories
         String hashtags = String.join(" ", jsonStrings(info.path("suggested_hashtags")));
         boolean shippingExtra = info.path("shipping_extra").asBoolean(true);
 
@@ -279,7 +280,7 @@ public class DropshipExtractionService {
             n++;
             String colour = v.colour() == null ? "Colour " + n : capitalise(v.colour());
             int productId = insertProduct(title + " – " + colour, desc + (v.secondary() == null ? "" : "\n" + v.secondary()),
-                category, d.supplierPrice(), d.sellingPrice(), hashtags, v.photo().url());
+                productCategory, d.supplierPrice(), d.sellingPrice(), hashtags, v.photo().url());
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("item_code", code + "-" + String.format("%02d", n));
             item.put("product_id", productId);
@@ -397,6 +398,25 @@ public class DropshipExtractionService {
                 VALUES (?1, ?2, 'image', 0, NOW())""")
             .setParameter(1, productId).setParameter(2, imageUrl).executeUpdate();
         return productId;
+    }
+
+    /**
+     * The firm's own Product category for the AI's category word (products.category references
+     * product_category.category_name): same name ignoring case / plural, else saree → Sarees, dress material → Dress
+     * Suits / Dress Materials, kurti / lehenga / dupatta / readymade → Readymades; null when nothing fits.
+     */
+    private String existingCategory(String aiCategory) {
+        @SuppressWarnings("unchecked")
+        List<String> names = em.createNativeQuery("SELECT category_name FROM product_category").getResultList();
+        String want = aiCategory == null ? "" : aiCategory.toLowerCase(Locale.ROOT).trim();
+        java.util.function.Function<String, String> stem = x -> x.toLowerCase(Locale.ROOT).replaceAll("[^a-z ]", "").replaceAll("s$", "").trim();
+        for (String n : names) if (stem.apply(n).equals(stem.apply(want))) return n;
+        List<String> hints = want.contains("saree") || want.contains("sari") ? List.of("saree")
+            : want.contains("dress") || want.contains("suit") || want.contains("material") ? List.of("dress suit", "dress material", "dress")
+            : want.matches(".*(kurti|kurta|lehenga|dupatta|readymade|blouse|gown|frock).*") ? List.of("readymade")
+            : List.of(stem.apply(want));
+        for (String h : hints) for (String n : names) if (!h.isBlank() && stem.apply(n).contains(h)) return n;
+        return null;
     }
 
     /** {prefix}{ddMM}, then A, B, … while a collection or item already uses it. */
