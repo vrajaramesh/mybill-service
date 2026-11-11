@@ -55,6 +55,8 @@ public class WaIntakeBatch {
     public void setError(String error) { this.error = error; }
     public LocalDateTime getCreatedAt() { return createdAt; }
     public LocalDateTime getUpdatedAt() { return updatedAt; }
+    /** Restarts the idle timer (a new message arrived); also makes the row dirty so it is saved. */
+    public void setUpdatedAtNow() { this.updatedAt = LocalDateTime.now(); }
     public LocalDateTime getClosedAt() { return closedAt; }
     public void setClosedAt(LocalDateTime closedAt) { this.closedAt = closedAt; }
 }

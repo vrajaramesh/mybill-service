@@ -59,6 +59,18 @@ public class GcsUploadService implements ImageUploadService {
         }
     }
 
+    /** Upload to a chosen object name (e.g. dropship/12/original/3.jpg); returns the public URL. Overwrites. */
+    public String uploadToPath(byte[] bytes, String mimeType, String objectName) {
+        try {
+            BlobId blobId = BlobId.of(bucketName, objectName);
+            BlobInfo blobInfo = BlobInfo.newBuilder(blobId).setContentType(mimeType != null ? mimeType : "image/jpeg").build();
+            storage.create(blobInfo, bytes);
+            return "https://storage.googleapis.com/" + bucketName + "/" + objectName;
+        } catch (Exception e) {
+            throw new RuntimeException("GCS upload error: " + e.getMessage(), e);
+        }
+    }
+
     public String uploadVideo(byte[] bytes) {
         try {
             String objectName = "reels/" + UUID.randomUUID() + ".mp4";

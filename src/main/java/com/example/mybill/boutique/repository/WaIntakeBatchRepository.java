@@ -1,7 +1,11 @@
 package com.example.mybill.boutique.repository;
 
 import com.example.mybill.boutique.entity.WaIntakeBatch;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,4 +20,9 @@ public interface WaIntakeBatchRepository extends JpaRepository<WaIntakeBatch, In
     List<WaIntakeBatch> findByStatusAndUpdatedAtBefore(String status, LocalDateTime before);
 
     List<WaIntakeBatch> findTop50ByOrderByCreatedAtDesc();
+
+    /** Row lock: photos of one post arrive in parallel tasks and must get distinct numbers. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM WaIntakeBatch b WHERE b.batchId = :id")
+    Optional<WaIntakeBatch> lockById(@Param("id") Integer id);
 }
