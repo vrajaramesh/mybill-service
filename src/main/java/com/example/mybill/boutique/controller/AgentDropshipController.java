@@ -22,6 +22,14 @@ public class AgentDropshipController {
 
     @Autowired private DropshipIntakeService intake;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
+    @Autowired private com.example.mybill.boutique.service.OwnerNumberService ownerNumbers;
+
+    /** Active owner numbers (digits with country code): srisa-agent routes their messages to the intake. */
+    @GetMapping("/owner-numbers")
+    public Map<String, Object> ownerNumbers() {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return Map.of("numbers", ownerNumbers.activePhones());
+    }
 
     /** {wa_message_id, from, type (text|image), text, media_id, mime_type, timestamp, image_base64}. */
     @PostMapping("/intake")
