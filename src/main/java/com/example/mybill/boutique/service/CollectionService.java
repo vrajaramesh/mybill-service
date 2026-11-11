@@ -26,6 +26,12 @@ import java.util.*;
 public class CollectionService {
 
     public static final String FABRIC = "FABRIC", READYMADE = "READYMADE", DROPSHIP = "DROPSHIP", WHOLESALE = "WHOLESALE";
+    /** Collection lifecycle (V18): DRAFT until approved, ACTIVE = the assistant sells it (is_active), ARCHIVED. */
+    public static final Set<String> STATUSES = Set.of("DRAFT", "ACTIVE", "ARCHIVED");
+    public static final String AVAILABLE = "AVAILABLE", SOLD_OUT = "SOLD_OUT";
+    /** Variant details (V18) kept from the stored row when the UI saves items without them. */
+    private static final List<String> VARIANT_FIELDS = List.of("variant_no", "secondary_desc", "original_image_path",
+        "stamped_image_url", "image_phash", "status");
     static final Set<String> METRE_UNITS = Set.of("m", "meter", "meters", "metre", "metres", "mts", "mtr", "mtrs");
     static final Set<String> PIECE_UNITS = Set.of("pcs", "pc", "piece", "pieces", "nos", "no");
     static final int MAX_ITEMS = 60;
@@ -50,7 +56,7 @@ public class CollectionService {
         List<Map<String, Object>> out = new ArrayList<>();
         for (Object r : em.createNativeQuery("""
                 SELECT c.collection_id, c.code, c.name, c.collection_type, c.is_active, c.cover_image_url,
-                       (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id)
+                       (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id), c.status
                   FROM boutique_collections c ORDER BY c.created_at DESC, c.collection_id DESC""").getResultList()) {
             Object[] a = (Object[]) r;
             Map<String, Object> m = new LinkedHashMap<>();
@@ -61,6 +67,7 @@ public class CollectionService {
             m.put("active", a[4]);
             m.put("cover_image_url", a[5]);
             m.put("item_count", ((Number) a[6]).intValue());
+            m.put("status", a[7]);
             out.add(m);
         }
         return out;
@@ -86,6 +93,9 @@ public class CollectionService {
         out.put("cover_image_url", c[5]);
         out.put("ai_instructions", c[6]);
         out.put("active", c[7]);
+        out.put("status", c[11]);
+        out.put("source", c[12]);
+        out.put("shipping_extra", c[13]);
         boolean isWholesale = WHOLESALE.equals(c[3]);
         List<Map<String, Object>> items = isWholesale ? wholesaleItems(id) : items(id);
         boolean isDropship = DROPSHIP.equals(c[3]);
@@ -104,7 +114,8 @@ public class CollectionService {
             out.put("courier_slabs", slabs.perZone());
             out.put("courier_extra_per_piece", c[10]);
         } else {
-            items.forEach(i -> i.remove("cost_price"));
+            items.removeIf(i -> SOLD_OUT.equals(i.get("status")));
+            items.forEach(i -> { i.remove("cost_price"); i.remove("original_image_path"); i.remove("image_phash"); });
             if (isWholesale) items.forEach(i -> i.remove("stock"));   // the assistant only says in stock or not
         }
         out.put("items", items);
@@ -135,7 +146,7 @@ public class CollectionService {
         boolean numeric = codeOrId.matches("\\d{1,9}");
         List<?> rows = em.createNativeQuery("""
                 SELECT collection_id, code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
-                       supplier_id, courier_slabs, courier_extra_per_piece
+                       supplier_id, courier_slabs, courier_extra_per_piece, status, source, shipping_extra
                   FROM boutique_collections""" + (numeric ? " WHERE collection_id = CAST(?1 AS INTEGER)" : " WHERE UPPER(code) = UPPER(?1)"))
             .setParameter(1, codeOrId.trim()).getResultList();
         if (rows.isEmpty()) throw AgentApiException.notFound("COLLECTION_NOT_FOUND", "No collection " + codeOrId);
@@ -148,7 +159,8 @@ public class CollectionService {
                        p.product_name, p.unit, p.selling_price, p.stock_quantity, p.is_active, p.is_online, p.ai_instructions,
                        p.description, p.cost_price,
                        (SELECT pi.image_url FROM product_images pi WHERE pi.product_id = i.product_id
-                          AND COALESCE(pi.media_type, 'image') = 'image' ORDER BY COALESCE(pi.sort_order, 0), pi.image_id LIMIT 1)
+                          AND COALESCE(pi.media_type, 'image') = 'image' ORDER BY COALESCE(pi.sort_order, 0), pi.image_id LIMIT 1),
+                       i.variant_no, i.secondary_desc, i.original_image_path, i.stamped_image_url, i.image_phash, i.status
                   FROM boutique_collection_items i LEFT JOIN products p ON p.product_id = i.product_id
                  WHERE i.collection_id = ?1 ORDER BY i.sort_order, i.item_id""")
             .setParameter(1, collectionId).getResultList();
@@ -172,15 +184,28 @@ public class CollectionService {
             m.put("description", a[13]);
             m.put("cost_price", a[14] == null ? null : PricingService.money(new BigDecimal(a[14].toString())));
             m.put("sizes", sizes.getOrDefault(productId, List.of()));
+            putVariant(m, a, 16);
             out.add(m);
         }
         return out;
     }
 
+    /** The V18 variant columns, starting at row index `from`. */
+    private static void putVariant(Map<String, Object> m, Object[] a, int from) {
+        m.put("variant_no", a[from]);
+        m.put("secondary_desc", a[from + 1]);
+        m.put("original_image_path", a[from + 2]);
+        m.put("stamped_image_url", a[from + 3]);
+        m.put("image_phash", a[from + 4]);
+        m.put("status", a[from + 5] == null ? AVAILABLE : a[from + 5]);
+    }
+
     /** Items of a WHOLESALE collection, filled from their wholesale products. */
     private List<Map<String, Object>> wholesaleItems(int collectionId) {
         List<?> rows = em.createNativeQuery("""
-                SELECT item_id, item_code, wholesale_product_id, colour, image_url FROM boutique_collection_items
+                SELECT item_id, item_code, wholesale_product_id, colour, image_url,
+                       variant_no, secondary_desc, original_image_path, stamped_image_url, image_phash, status
+                  FROM boutique_collection_items
                  WHERE collection_id = ?1 ORDER BY sort_order, item_id""").setParameter(1, collectionId).getResultList();
         Set<Integer> ids = new HashSet<>();
         for (Object r : rows) if (((Object[]) r)[2] != null) ids.add(((Number) ((Object[]) r)[2]).intValue());
@@ -203,6 +228,7 @@ public class CollectionService {
             m.put("available", p != null && p.active());
             m.put("ai_instructions", p == null ? null : p.aiInstructions());
             m.put("description", p == null ? null : p.description());
+            putVariant(m, a, 5);
             out.add(m);
         }
         return out;
@@ -342,21 +368,33 @@ public class CollectionService {
         if (!clash.isEmpty() && (collectionId == null || ((Number) clash.get(0)).intValue() != collectionId)) {
             throw new AgentApiException(HttpStatus.CONFLICT, "COLLECTION_CODE_TAKEN", "Code " + code + " is already used", null);
         }
-        boolean active = !(body.get("active") instanceof Boolean b) || b;
+        String existingStatus = collectionId == null ? null : (String) header(String.valueOf(collectionId))[11];
+        String status = str(body.get("status")).toUpperCase(Locale.ROOT);
+        if (status.isEmpty()) {
+            boolean wantsActive = !(body.get("active") instanceof Boolean b) || b;
+            status = wantsActive ? "ACTIVE" : "DRAFT".equals(existingStatus) ? "DRAFT" : "ARCHIVED";
+        }
+        if (!STATUSES.contains(status)) throw bad("Status must be DRAFT, ACTIVE or ARCHIVED");
+        boolean active = "ACTIVE".equals(status);
+        String source = str(body.get("source")).toUpperCase(Locale.ROOT);
+        if (source.isEmpty()) source = "MANUAL";
+        if (!source.equals("MANUAL") && !source.equals("WHATSAPP_FORWARD")) throw bad("Source must be MANUAL or WHATSAPP_FORWARD");
+        boolean shippingExtra = !(body.get("shipping_extra") instanceof Boolean se) || se;
         NativeQuery<?> q;
         if (collectionId == null) {
             q = em.createNativeQuery("""
                     INSERT INTO boutique_collections (code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
-                                                      supplier_id, courier_slabs, courier_extra_per_piece)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) RETURNING collection_id""").unwrap(NativeQuery.class);
+                                                      supplier_id, courier_slabs, courier_extra_per_piece, status, source, shipping_extra)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) RETURNING collection_id""").unwrap(NativeQuery.class);
         } else {
             header(String.valueOf(collectionId));
             q = em.createNativeQuery("""
                     UPDATE boutique_collections SET code = ?1, name = ?2, collection_type = ?3, description = ?4,
                            cover_image_url = ?5, ai_instructions = ?6, is_active = ?7, supplier_id = ?8, courier_slabs = ?9,
-                           courier_extra_per_piece = ?10, updated_at = NOW()
-                     WHERE collection_id = ?11 RETURNING collection_id""").unwrap(NativeQuery.class);
-            q.setParameter(11, collectionId, Integer.class);
+                           courier_extra_per_piece = ?10, status = ?11, source = COALESCE(source, ?12), shipping_extra = ?13,
+                           updated_at = NOW()
+                     WHERE collection_id = ?14 RETURNING collection_id""").unwrap(NativeQuery.class);
+            q.setParameter(14, collectionId, Integer.class);
         }
         q.setParameter(1, code, String.class).setParameter(2, name, String.class).setParameter(3, type, String.class)
             .setParameter(4, nullable(body.get("description")), String.class)
@@ -365,7 +403,10 @@ public class CollectionService {
             .setParameter(7, active, Boolean.class)
             .setParameter(8, supplierId, Integer.class)
             .setParameter(9, slabs, String.class)
-            .setParameter(10, extra, BigDecimal.class);
+            .setParameter(10, extra, BigDecimal.class)
+            .setParameter(11, status, String.class)
+            .setParameter(12, source, String.class)
+            .setParameter(13, shippingExtra, Boolean.class);
         int id = ((Number) q.getSingleResult()).intValue();
         return get(String.valueOf(id), true);
     }
@@ -399,23 +440,60 @@ public class CollectionService {
             Set<Integer> known = wholesale.products(ids).keySet();
             for (Integer id : ids) if (!known.contains(id)) throw bad("No wholesale product " + id);
         }
+        Map<String, Object[]> kept = new HashMap<>();   // ITEM CODE -> stored V18 variant details
+        for (Object r : em.createNativeQuery("""
+                SELECT UPPER(item_code), variant_no, secondary_desc, original_image_path, stamped_image_url, image_phash, status
+                  FROM boutique_collection_items WHERE collection_id = ?1""").setParameter(1, collectionId).getResultList()) {
+            Object[] a = (Object[]) r;
+            kept.put((String) a[0], Arrays.copyOfRange(a, 1, 7));
+        }
         em.createNativeQuery("DELETE FROM boutique_collection_items WHERE collection_id = ?1").setParameter(1, collectionId).executeUpdate();
         int order = 0;
         for (Map<String, Object> item : items) {
             em.createNativeQuery("""
                     INSERT INTO boutique_collection_items (collection_id, item_code, product_id, colour, image_url, sort_order,
-                                                           wholesale_product_id)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)""").unwrap(NativeQuery.class)
+                                                           wholesale_product_id, variant_no, secondary_desc, original_image_path,
+                                                           stamped_image_url, image_phash, status)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)""").unwrap(NativeQuery.class)
                 .setParameter(1, collectionId, Integer.class)
                 .setParameter(2, str(item.get("item_code")).toUpperCase(Locale.ROOT), String.class)
                 .setParameter(3, isWholesale ? null : ((Number) item.get("product_id")).intValue(), Integer.class)
                 .setParameter(7, isWholesale ? ((Number) item.get(idKey)).intValue() : null, Integer.class)
+                .setParameter(8, variantNo(variant(item, kept, 0)), Integer.class)
+                .setParameter(9, (String) variant(item, kept, 1), String.class)
+                .setParameter(10, (String) variant(item, kept, 2), String.class)
+                .setParameter(11, (String) variant(item, kept, 3), String.class)
+                .setParameter(12, (String) variant(item, kept, 4), String.class)
+                .setParameter(13, itemStatus(variant(item, kept, 5)), String.class)
                 .setParameter(4, nullable(item.get("colour")), String.class)
                 .setParameter(5, nullable(item.get("image_url")), String.class)
                 .setParameter(6, order++, Integer.class)
                 .executeUpdate();
         }
         return get(String.valueOf(collectionId), true);
+    }
+
+    /** A V18 variant field: from the request if it has the key, else the stored value for that item code. */
+    private static Object variant(Map<String, Object> item, Map<String, Object[]> kept, int index) {
+        String key = VARIANT_FIELDS.get(index);
+        if (item.containsKey(key)) {
+            Object v = item.get(key);
+            return v == null || v.toString().isBlank() ? null : (v instanceof Number ? v : v.toString().trim());
+        }
+        Object[] stored = kept.get(str(item.get("item_code")).toUpperCase(Locale.ROOT));
+        return stored == null ? null : stored[index];
+    }
+
+    private static Integer variantNo(Object v) {
+        if (v == null) return null;
+        if (v instanceof Number n) return n.intValue();
+        try { return Integer.valueOf(v.toString()); } catch (NumberFormatException e) { throw bad("Variant number must be a whole number"); }
+    }
+
+    private static String itemStatus(Object v) {
+        String s = v == null ? AVAILABLE : v.toString().toUpperCase(Locale.ROOT);
+        if (!AVAILABLE.equals(s) && !SOLD_OUT.equals(s)) throw bad("Item status must be AVAILABLE or SOLD_OUT");
+        return s;
     }
 
     @Transactional

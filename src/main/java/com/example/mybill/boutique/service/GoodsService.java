@@ -63,11 +63,14 @@ public class GoodsService {
         if (!codes.isEmpty()) {
             for (Object r : em.createNativeQuery("""
                     SELECT UPPER(i.item_code), i.product_id, i.colour, i.item_code, c.collection_type, c.code, c.supplier_id,
-                           c.courier_slabs, c.courier_extra_per_piece, i.wholesale_product_id
+                           c.courier_slabs, c.courier_extra_per_piece, i.wholesale_product_id, i.status, c.is_active
                       FROM boutique_collection_items i JOIN boutique_collections c ON c.collection_id = i.collection_id
                      WHERE UPPER(i.item_code) IN (?1)""")
                     .setParameter(1, codes).getResultList()) {
                 Object[] a = (Object[]) r;
+                if ("SOLD_OUT".equals(a[10]) || Boolean.FALSE.equals(a[11])) {   // sold out, or a DRAFT / ARCHIVED collection
+                    throw err("PRODUCT_UNAVAILABLE", a[3] + " is not available right now", Map.of("code", a[3]));
+                }
                 if (WHOLESALE.equals(a[4])) {
                     if (a[9] != null) wholesaleItems.put((String) a[0], new Object[]{((Number) a[9]).intValue(), a[2], a[3], a[5]});
                     continue;
