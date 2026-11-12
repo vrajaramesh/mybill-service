@@ -13,8 +13,9 @@ import java.util.*;
 
 /**
  * WhatsApp → Dropship, phase 6 (customer side, called by srisa-agent): before a customer can pay for a dropship
- * variant the owner confirms it is still available with the supplier (Yes / No buttons to every active owner
- * number); "No" marks the variant SOLD_OUT so it is never offered again.
+ * variant the owner confirms it is still available with the supplier (Yes / No buttons to the owner who forwarded the
+ * post - each owner number is its own user; every active owner only for a collection made by hand); "No" marks the
+ * variant SOLD_OUT so it is never offered again.
  */
 @Service
 public class DropshipCustomerService {
@@ -27,7 +28,7 @@ public class DropshipCustomerService {
     @Autowired private DropshipService dropship;
     @Autowired private ApplicationEventPublisher events;
 
-    /** Ask the owner(s) "Is MGP1111-07 available with {supplier}?". Returns {asked: n}. */
+    /** Ask the collection's owner "Is MGP1111-07 available with {supplier}?". Returns {asked: n}. */
     @Transactional(readOnly = true)
     public Map<String, Object> askAvailability(String itemCode, String conversationId, String customerName, String customerPhone) {
         Object[] row = itemRow(itemCode);
@@ -41,7 +42,7 @@ public class DropshipCustomerService {
         List<Map<String, String>> buttons = List.of(
             Map.of("id", AVAIL + "y:" + conversationId + ":" + code, "title", "✅ Yes"),
             Map.of("id", AVAIL + "n:" + conversationId + ":" + code, "title", "❌ No"));
-        List<String> owners = ownerNumbers.activePhones();
+        List<String> owners = ownerNumbers.recipientsFor(ownerNumbers.ownerOfItem(code));
         for (String owner : owners) {
             events.publishEvent(new DropshipIntakeService.OwnerMessage(owner, "avail:" + conversationId + ":" + code + ":" + owner
                 + ":" + UUID.randomUUID(), "buttons", text, null, null, (String) row[4], null, buttons));

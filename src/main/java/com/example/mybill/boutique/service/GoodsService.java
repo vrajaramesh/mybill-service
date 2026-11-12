@@ -56,14 +56,15 @@ public class GoodsService {
     /** pincode (may be null) only matters for dropship carts: the supplier's courier charge depends on the zone. */
     @Transactional(readOnly = true)
     public Priced price(List<GoodsLine> lines, String pincode) {
-        Map<String, Object[]> items = new HashMap<>();          // ITEM CODE -> {product_id, colour, item_code, DropshipSource}
+        Map<String, Object[]> items = new HashMap<>();          // ITEM CODE -> {product_id (dropship: dropship_product_id), colour, item_code, DropshipSource}
         Map<String, Object[]> wholesaleItems = new HashMap<>(); // ITEM CODE -> {wholesale_product_id, colour, item_code, collection code}
         Set<String> codes = new HashSet<>();
         for (GoodsLine l : lines) if (l.itemCode() != null && !l.itemCode().isBlank()) codes.add(l.itemCode().trim().toUpperCase(Locale.ROOT));
         if (!codes.isEmpty()) {
             for (Object r : em.createNativeQuery("""
                     SELECT UPPER(i.item_code), i.product_id, i.colour, i.item_code, c.collection_type, c.code, c.supplier_id,
-                           c.courier_slabs, c.courier_extra_per_piece, i.wholesale_product_id, i.status, c.is_active
+                           c.courier_slabs, c.courier_extra_per_piece, i.wholesale_product_id, i.status, c.is_active,
+                           i.dropship_product_id
                       FROM boutique_collection_items i JOIN boutique_collections c ON c.collection_id = i.collection_id
                      WHERE UPPER(i.item_code) IN (?1)""")
                     .setParameter(1, codes).getResultList()) {
@@ -75,26 +76,32 @@ public class GoodsService {
                     if (a[9] != null) wholesaleItems.put((String) a[0], new Object[]{((Number) a[9]).intValue(), a[2], a[3], a[5]});
                     continue;
                 }
+                if (DROPSHIP.equals(a[4])) {   // the variant is in dropship_products (V21), not in Products
+                    if (a[12] == null) continue;
+                    DropshipSource ds = new DropshipSource((String) a[5], a[6] == null ? null : ((Number) a[6]).intValue(),
+                        (String) a[7], a[8] == null ? null : new BigDecimal(a[8].toString()));
+                    items.put((String) a[0], new Object[]{((Number) a[12]).intValue(), a[2], a[3], ds});
+                    continue;
+                }
                 if (a[1] == null) continue;
-                DropshipSource ds = DROPSHIP.equals(a[4]) ? new DropshipSource((String) a[5],
-                    a[6] == null ? null : ((Number) a[6]).intValue(), (String) a[7],
-                    a[8] == null ? null : new BigDecimal(a[8].toString())) : null;
-                items.put((String) a[0], new Object[]{((Number) a[1]).intValue(), a[2], a[3], ds});
+                items.put((String) a[0], new Object[]{((Number) a[1]).intValue(), a[2], a[3], null});
             }
         }
         if (!wholesaleItems.isEmpty()) return wholesale(lines, wholesaleItems);
-        Set<Integer> productIds = new HashSet<>();
+        Set<Integer> productIds = new HashSet<>(), dropshipIds = new HashSet<>();
         for (GoodsLine l : lines) {
             if (l.itemCode() != null && !l.itemCode().isBlank()) {
                 Object[] item = items.get(l.itemCode().trim().toUpperCase(Locale.ROOT));
                 if (item == null) throw err("ITEM_NOT_FOUND", "No item with code " + l.itemCode(), Map.of("item_code", l.itemCode()));
-                productIds.add((Integer) item[0]);
+                (item[3] != null ? dropshipIds : productIds).add((Integer) item[0]);
             } else {
                 productIds.add(l.productId());
             }
         }
         Map<Integer, Product> products = products(productIds);
         Map<Integer, Map<String, Object[]>> sizes = sizes(productIds);   // product -> SIZE -> {label, stock}
+        Map<Integer, Map<String, Object[]>> dropshipSizes = new HashMap<>();
+        Map<Integer, Product> dropshipProducts = dropshipProducts(dropshipIds, dropshipSizes);
 
         Map<Integer, BigDecimal> metresUsed = new HashMap<>();
         Map<String, BigDecimal> piecesUsed = new HashMap<>();             // "product|SIZE" -> pieces
@@ -111,7 +118,7 @@ public class GoodsService {
             String colour = item != null ? (String) item[1] : null;
             DropshipSource ds = item != null ? (DropshipSource) item[3] : null;
             String label = code != null ? code : "product " + productId;
-            Product p = products.get(productId);
+            Product p = ds != null ? dropshipProducts.get(productId) : products.get(productId);
             if (p == null || !p.available()) {
                 throw err("PRODUCT_UNAVAILABLE", label + " is not available right now", Map.of("code", label));
             }
@@ -122,7 +129,7 @@ public class GoodsService {
                 if (qty.signum() <= 0 || qty.stripTrailingZeros().scale() > 0) {
                     throw err("INVALID_QUANTITY", label + " is ordered in whole pieces", Map.of("code", label));
                 }
-                Map<String, Object[]> productSizes = sizes.getOrDefault(productId, Map.of());
+                Map<String, Object[]> productSizes = dropshipSizes.getOrDefault(productId, Map.of());
                 if (!productSizes.isEmpty()) {
                     List<String> all = productSizes.values().stream().map(s -> (String) s[0]).toList();
                     if (l.size() == null || l.size().isBlank()) {
@@ -138,7 +145,7 @@ public class GoodsService {
                 }
                 dropshipSources.add(ds);
                 dropshipPieces += qty.intValueExact();
-                if (p.cost() == null) log.warn("DROPSHIP_COST_MISSING product={} item={} (supplier cost counted as 0)", productId, label);
+                if (p.cost() == null) log.warn("DROPSHIP_COST_MISSING dropship_product={} item={} (supplier cost counted as 0)", productId, label);
                 else dropshipCost = dropshipCost.add(p.cost().multiply(qty));
             } else if (CollectionService.isMetres(p.unit())) {
                 kind = FABRIC;
@@ -185,7 +192,7 @@ public class GoodsService {
             }
             kinds.add(kind);
             BigDecimal lineTotal = PricingService.money(p.price().multiply(qty));
-            out.add(new GoodsLineResponse(code, productId, p.name(), colour, kind, FABRIC.equals(kind) ? "m" : "piece",
+            out.add(new GoodsLineResponse(code, ds != null ? null : productId, p.name(), colour, kind, FABRIC.equals(kind) ? "m" : "piece",
                 size, qty.stripTrailingZeros(), PricingService.money(p.price()), lineTotal));
         }
         BigDecimal subtotal = out.stream().map(GoodsLineResponse::lineTotal).reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -261,6 +268,25 @@ public class GoodsService {
                 a[4] == null ? BigDecimal.ZERO : new BigDecimal(a[4].toString()),
                 Boolean.TRUE.equals(a[5]) && !Boolean.FALSE.equals(a[6]) && price.signum() > 0,
                 a[7] == null ? null : new BigDecimal(a[7].toString())));
+        }
+        return out;
+    }
+
+    /** Dropship variants (dropship_products, V21); their sizes ("S,M,L") go into sizesOut. */
+    private Map<Integer, Product> dropshipProducts(Set<Integer> ids, Map<Integer, Map<String, Object[]>> sizesOut) {
+        Map<Integer, Product> out = new HashMap<>();
+        if (ids.isEmpty()) return out;
+        for (Object r : em.createNativeQuery("""
+                SELECT dropship_product_id, product_name, selling_price, is_active, cost_price, sizes
+                  FROM dropship_products WHERE dropship_product_id IN (?1)""").setParameter(1, ids).getResultList()) {
+            Object[] a = (Object[]) r;
+            int id = ((Number) a[0]).intValue();
+            BigDecimal price = a[2] == null ? BigDecimal.ZERO : new BigDecimal(a[2].toString());
+            out.put(id, new Product(id, (String) a[1], "pcs", price, BigDecimal.ZERO, Boolean.TRUE.equals(a[3]) && price.signum() > 0,
+                a[4] == null ? null : new BigDecimal(a[4].toString())));
+            for (String size : CollectionService.sizeList((String) a[5])) {
+                sizesOut.computeIfAbsent(id, k -> new LinkedHashMap<>()).put(size.toUpperCase(Locale.ROOT), new Object[]{size, BigDecimal.ZERO});
+            }
         }
         return out;
     }

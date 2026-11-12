@@ -243,10 +243,10 @@ public class DropshipPublishService {
         if (catalogId == null || catalogId.isBlank() || accessToken == null || accessToken.isBlank()) return 0;
         List<Map<String, Object>> requests = new ArrayList<>();
         for (Map<String, Object> it : items) {
-            if (it.get("product_id") == null || it.get("price") == null) continue;
-            String code = String.valueOf(it.get("item_code"));
+            if (it.get("price") == null) continue;
+            String code = String.valueOf(it.get("item_code"));   // retailer id: dropship variants aren't in Products
             Map<String, Object> data = new LinkedHashMap<>();
-            data.put("id", String.valueOf(it.get("product_id")));
+            data.put("id", code);
             data.put("title", (c.get("name") + " – " + Objects.toString(it.get("colour"), code)).replaceAll("\\s+", " ").trim());
             data.put("description", Objects.toString(c.get("description"), String.valueOf(c.get("name"))) + "\nCode " + code);
             data.put("brand", "SRISA");
@@ -255,7 +255,7 @@ public class DropshipPublishService {
             data.put("condition", "new");
             data.put("link", "https://wa.me/" + shopWhatsapp + "?text=" + enc("Hi SRISA! I'd like " + code));
             data.put("image_link", photo(it));
-            requests.add(Map.of("method", "UPDATE", "retailer_id", String.valueOf(it.get("product_id")), "data", data));
+            requests.add(Map.of("method", "UPDATE", "retailer_id", code, "data", data));
         }
         if (requests.isEmpty()) return 0;
         Map<String, Object> payload = Map.of("item_type", "PRODUCT_ITEM", "allow_upsert", true, "requests", requests);

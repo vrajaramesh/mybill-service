@@ -71,6 +71,7 @@ public class AgentEventNotifier {
         if (event.tenant() != null) body.put("tenant", event.tenant());
         if (event.supplierName() != null) body.put("supplier_name", event.supplierName());
         if (event.supplierPhone() != null) body.put("supplier_phone", event.supplierPhone());
+        if (event.ownerPhone() != null) body.put("owner_phone", event.ownerPhone());
         return post(body, event.event() + " " + event.orderNo());
     }
 

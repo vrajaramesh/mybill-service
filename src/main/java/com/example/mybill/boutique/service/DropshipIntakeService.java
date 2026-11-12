@@ -45,6 +45,7 @@ public class DropshipIntakeService {
     @Autowired private WaIntakeBatchRepository batches;
     @Autowired private WaIntakeMessageRepository messages;
     @Autowired private DropshipService dropship;
+    @Autowired private OwnerNumberService ownerNumbers;
     @Autowired private GcsUploadService gcs;
     @Autowired private ApplicationEventPublisher events;
     @jakarta.persistence.PersistenceContext private jakarta.persistence.EntityManager em;
@@ -244,6 +245,7 @@ public class DropshipIntakeService {
             if (b == null || !WaIntakeBatch.AWAITING_SUPPLIER.equals(b.getStatus())) {
                 return Map.of("handled", false, "reason", "batch_not_waiting");
             }
+            if (!owner.equals(b.getFromNumber())) return notYours(owner, "Post #" + b.getBatchId(), b.getFromNumber());
             if (row.group(2) != null) {   // "More suppliers"
                 askSupplier(b, messages.findByBatchIdOrderByReceivedAtAscMessageIdAsc(b.getBatchId()), parseInt(row.group(3)), false);
                 return Map.of("handled", true, "action", "next_page");
@@ -316,6 +318,8 @@ public class DropshipIntakeService {
         WaIntakeBatch b = batchOfCollection(collectionId).orElse(null);
         if (b == null) return Map.of("handled", false, "reason", "unknown_collection");
         String code = collectionCode(collectionId);
+        Optional<String> postedBy = ownerNumbers.ownerOfCollection(collectionId);
+        if (postedBy.isPresent() && !owner.equals(postedBy.get())) return notYours(owner, code, postedBy.get());
         if (replyId.startsWith(EDIT_PRICE)) {
             tell(b, "text", "Send the new price for every colour of " + code + ", e.g.\n*PRICE 1799*", null, null);
             return Map.of("handled", true, "action", "asked_price");
@@ -343,6 +347,8 @@ public class DropshipIntakeService {
                 .map(WaIntakeBatch::getCollectionId).findFirst().orElse(null);
         }
         if (collectionId == null) return Map.of("handled", false, "reason", "no_collection");
+        Optional<String> postedBy = ownerNumbers.ownerOfCollection(collectionId);
+        if (postedBy.isPresent() && !owner.equals(postedBy.get())) return notYours(owner, collectionCode(collectionId), postedBy.get());
         approval.setPriceForAll(collectionId, amount);
         int cid = collectionId;
         batchOfCollection(cid).ifPresent(b -> events.publishEvent(new OwnerMessage(b.getFromNumber(),
@@ -353,7 +359,17 @@ public class DropshipIntakeService {
     }
 
     private Optional<WaIntakeBatch> batchOfCollection(int collectionId) {
-        return batches.findTop50ByOrderByCreatedAtDesc().stream().filter(x -> Objects.equals(x.getCollectionId(), collectionId)).findFirst();
+        List<?> ids = em.createNativeQuery("SELECT batch_id FROM wa_intake_batch WHERE collection_id = ?1 ORDER BY batch_id DESC LIMIT 1")
+            .setParameter(1, collectionId).getResultList();
+        return ids.isEmpty() ? Optional.empty() : batches.findById(((Number) ids.get(0)).intValue());
+    }
+
+    /** Each owner number is its own user: a post (and its collection) is handled only by the owner who forwarded it. */
+    private Map<String, Object> notYours(String owner, String what, String postedBy) {
+        events.publishEvent(new OwnerMessage(owner, "dropship:other:" + UUID.randomUUID(), "text",
+            "ℹ️ " + what + " was forwarded from +" + postedBy + " – only that number can answer for it here "
+                + "(or use mybill → Collections).", null, null, null, null));
+        return Map.of("handled", true, "action", "not_your_post");
     }
 
     private String collectionCode(int collectionId) {

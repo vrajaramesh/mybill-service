@@ -40,8 +40,9 @@ import java.util.stream.Collectors;
  *   <li>dHash per photo: near-duplicates within the post and of products added in the last 30 days are skipped.</li>
  *   <li>Codes {prefix}{ddMM}[A|B…], variants -{nn} (MGP1111-07); selling price = supplier price × margin rounded up to
  *       a price ending in 49 / 99 (dropship.pricing.*).</li>
- *   <li>One Products row (pcs, cost = supplier price, stock 0, not online yet) + collection item per photo; the
- *       collection is DROPSHIP, DRAFT, source WHATSAPP_FORWARD, with the supplier's default courier charges.</li>
+ *   <li>One dropship_products row (cost = supplier price; never in Products) + collection item per photo; the
+ *       collection is DROPSHIP, DRAFT, source WHATSAPP_FORWARD, with the supplier's default courier charges and the
+ *       owner number that forwarded it (owner_phone: every later question about it goes to that owner only).</li>
  * </ol>
  * The AI calls run outside any DB transaction; everything is written in one short transaction at the end, so a
  * failure leaves nothing half-made (the batch is then FAILED with the reason and the owner is told).
@@ -214,8 +215,8 @@ public class DropshipExtractionService {
 
     private List<String> recentHashes() {
         return tx.execute(s -> em.createNativeQuery("""
-                SELECT i.image_phash FROM boutique_collection_items i JOIN products p ON p.product_id = i.product_id
-                 WHERE i.image_phash IS NOT NULL AND p.created_at > NOW() - INTERVAL '30 days'""").getResultList()
+                SELECT i.image_phash FROM boutique_collection_items i JOIN dropship_products d ON d.dropship_product_id = i.dropship_product_id
+                 WHERE i.image_phash IS NOT NULL AND d.created_at > NOW() - INTERVAL '30 days'""").getResultList()
             .stream().map(String::valueOf).toList());
     }
 
@@ -247,7 +248,6 @@ public class DropshipExtractionService {
         String title = clip(blankOr(info.path("title").asText(null), "Dropship collection"), 120);
         String code = freeCode(prefix(info.path("code_prefix").asText(null)) + LocalDate.now(IST).format(DateTimeFormatter.ofPattern("ddMM")));
         String category = clip(blankOr(info.path("category").asText(null), "saree"), 50);
-        String productCategory = existingCategory(category);   // products.category must be one of Product categories
         String hashtags = String.join(" ", jsonStrings(info.path("suggested_hashtags")));
         boolean shippingExtra = info.path("shipping_extra").asBoolean(true);
 
@@ -274,17 +274,20 @@ public class DropshipExtractionService {
         if (snap.supplier().defaultCourierExtraPerPiece() != null) body.put("courier_extra_per_piece", snap.supplier().defaultCourierExtraPerPiece());
         if (!d.variants().isEmpty()) body.put("cover_image_url", d.variants().get(0).photo().url());
         int collectionId = ((Number) collections.save(null, body).get("collection_id")).intValue();
+        em.createNativeQuery("UPDATE boutique_collections SET owner_phone = ?1 WHERE collection_id = ?2")   // the owner who forwarded it
+            .setParameter(1, b.getFromNumber()).setParameter(2, collectionId).executeUpdate();
 
         List<Map<String, Object>> items = new ArrayList<>();
         int n = 0;
         for (Variant v : d.variants()) {
             n++;
             String colour = v.colour() == null ? "Colour " + n : capitalise(v.colour());
-            int productId = insertProduct(title + " – " + colour, desc + (v.secondary() == null ? "" : "\n" + v.secondary()),
-                productCategory, d.supplierPrice(), d.sellingPrice(), hashtags, v.photo().url());
+            int dropshipProductId = collections.insertDropshipProduct(collectionId, title + " – " + colour,
+                desc + (v.secondary() == null ? "" : "\n" + v.secondary()), category, d.supplierPrice(), d.sellingPrice(),
+                null, hashtags, v.photo().url());
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("item_code", code + "-" + String.format("%02d", n));
-            item.put("product_id", productId);
+            item.put("dropship_product_id", dropshipProductId);
             item.put("colour", clip(colour, 80));
             item.put("image_url", v.photo().url());
             item.put("variant_no", n);
@@ -383,44 +386,6 @@ public class DropshipExtractionService {
         String body = saved.message().length() > 1000 ? saved.message().substring(0, 1000) : saved.message();
         events.publishEvent(new DropshipIntakeService.OwnerMessage(b.getFromNumber(), "dropship:" + b.getBatchId() + ":" + UUID.randomUUID(),
             "buttons", body, null, null, collageUrl, null, DropshipIntakeService.approvalButtons(collectionId)));
-    }
-
-    private int insertProduct(String name, String description, String category, BigDecimal cost, BigDecimal price,
-                              String tags, String imageUrl) {
-        Object id = em.createNativeQuery("""
-                INSERT INTO products (product_name, description, category, unit, cost_price, selling_price, stock_quantity,
-                                      min_stock_level, is_active, is_online, tags, created_at, updated_at)
-                VALUES (?1, ?2, ?3, 'pcs', ?4, ?5, 0, 0, TRUE, FALSE, ?6, NOW(), NOW()) RETURNING product_id""")
-            .unwrap(NativeQuery.class)
-            .setParameter(1, clip(name, 200), String.class).setParameter(2, description.trim(), String.class)
-            .setParameter(3, category, String.class).setParameter(4, cost, BigDecimal.class)
-            .setParameter(5, price, BigDecimal.class).setParameter(6, tags.isBlank() ? null : tags, String.class)
-            .getSingleResult();
-        int productId = ((Number) id).intValue();
-        em.createNativeQuery("""
-                INSERT INTO product_images (product_id, image_url, media_type, sort_order, created_at)
-                VALUES (?1, ?2, 'image', 0, NOW())""")
-            .setParameter(1, productId).setParameter(2, imageUrl).executeUpdate();
-        return productId;
-    }
-
-    /**
-     * The firm's own Product category for the AI's category word (products.category references
-     * product_category.category_name): same name ignoring case / plural, else saree → Sarees, dress material → Dress
-     * Suits / Dress Materials, kurti / lehenga / dupatta / readymade → Readymades; null when nothing fits.
-     */
-    private String existingCategory(String aiCategory) {
-        @SuppressWarnings("unchecked")
-        List<String> names = em.createNativeQuery("SELECT category_name FROM product_category").getResultList();
-        String want = aiCategory == null ? "" : aiCategory.toLowerCase(Locale.ROOT).trim();
-        java.util.function.Function<String, String> stem = x -> x.toLowerCase(Locale.ROOT).replaceAll("[^a-z ]", "").replaceAll("s$", "").trim();
-        for (String n : names) if (stem.apply(n).equals(stem.apply(want))) return n;
-        List<String> hints = want.contains("saree") || want.contains("sari") ? List.of("saree")
-            : want.contains("dress") || want.contains("suit") || want.contains("material") ? List.of("dress suit", "dress material", "dress")
-            : want.matches(".*(kurti|kurta|lehenga|dupatta|readymade|blouse|gown|frock).*") ? List.of("readymade")
-            : List.of(stem.apply(want));
-        for (String h : hints) for (String n : names) if (!h.isBlank() && stem.apply(n).contains(h)) return n;
-        return null;
     }
 
     /** {prefix}{ddMM}, then A, B, … while a collection or item already uses it. */

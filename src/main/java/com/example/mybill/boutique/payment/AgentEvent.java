@@ -14,14 +14,25 @@ public record AgentEvent(String event, String orderNo, String customerPhone, Str
                          /** Firm schema the order belongs to (firm_srisa, firm_srihitha). */
                          String tenant,
                          /** DROPSHIP orders: who ships it (for the owner's "paid - order from …" message). */
-                         String supplierName, String supplierPhone) {
+                         String supplierName, String supplierPhone,
+                         /** DROPSHIP orders: the owner number that forwarded the post (gets the "paid" message). */
+                         String ownerPhone) {
+
+    public AgentEvent(String event, String orderNo, String customerPhone, String customerName, java.math.BigDecimal amount,
+                      java.time.LocalDate estimatedDeliveryDate, String eventId, String shortUrl,
+                      boolean exactMeasurementsRequired, String designCode, String designName, String orderType,
+                      String items, String deliveryAddress, String tenant, String supplierName, String supplierPhone) {
+        this(event, orderNo, customerPhone, customerName, amount, estimatedDeliveryDate, eventId, shortUrl,
+            exactMeasurementsRequired, designCode, designName, orderType, items, deliveryAddress, tenant, supplierName,
+            supplierPhone, null);
+    }
 
     public AgentEvent(String event, String orderNo, String customerPhone, String customerName, java.math.BigDecimal amount,
                       java.time.LocalDate estimatedDeliveryDate, String eventId, String shortUrl,
                       boolean exactMeasurementsRequired, String designCode, String designName, String orderType,
                       String items, String deliveryAddress, String tenant) {
         this(event, orderNo, customerPhone, customerName, amount, estimatedDeliveryDate, eventId, shortUrl,
-            exactMeasurementsRequired, designCode, designName, orderType, items, deliveryAddress, tenant, null, null);
+            exactMeasurementsRequired, designCode, designName, orderType, items, deliveryAddress, tenant, null, null, null);
     }
 
     public static final String ORDER_PAID = "order.paid";

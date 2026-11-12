@@ -52,6 +52,7 @@ public class PaymentLinkService {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private com.example.mybill.boutique.service.GoodsService goodsService;
     @Autowired @org.springframework.context.annotation.Lazy private com.example.mybill.boutique.service.DropshipService dropshipService;
+    @Autowired @org.springframework.context.annotation.Lazy private com.example.mybill.boutique.service.OwnerNumberService ownerNumbers;
 
     @Value("${boutique.payment.link-expiry-hours:24}") private int expiryHours;
     @Value("${boutique.payment.callback-url:}") private String callbackUrl;
@@ -320,7 +321,8 @@ public class PaymentLinkService {
                 .filter(v -> v != null && !v.isBlank()).toList()),
             String.valueOf(TenantContext.getCurrentTenant()),
             order.isDropship() ? order.getSupplierName() : null,
-            order.isDropship() ? supplierPhone(order) : null);
+            order.isDropship() ? supplierPhone(order) : null,
+            order.isDropship() && item != null ? ownerNumbers.ownerOfItem(item.getDesignCode()).orElse(null) : null);
     }
 
     private String supplierPhone(BoutiqueOrder order) {

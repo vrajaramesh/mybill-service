@@ -58,13 +58,15 @@ public class CollectionService {
                 SELECT c.collection_id, c.code, c.name, c.collection_type, c.is_active, c.cover_image_url,
                        (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id), c.status,
                        (SELECT s.name FROM boutique_suppliers s WHERE s.supplier_id = c.supplier_id),
-                       (SELECT MIN(p.selling_price) FROM boutique_collection_items i JOIN products p ON p.product_id = i.product_id
+                       (SELECT MIN(COALESCE(d.selling_price, p.selling_price)) FROM boutique_collection_items i
+                          LEFT JOIN products p ON p.product_id = i.product_id
+                          LEFT JOIN dropship_products d ON d.dropship_product_id = i.dropship_product_id
                          WHERE i.collection_id = c.collection_id),
                        (SELECT COUNT(*) FROM boutique_collection_items i WHERE i.collection_id = c.collection_id
                            AND COALESCE(i.status, 'AVAILABLE') = 'AVAILABLE'),
                        (SELECT l.permalink FROM marketing_links l WHERE l.collection_code = c.code AND l.permalink IS NOT NULL
                          ORDER BY l.active DESC, l.created_at DESC LIMIT 1),
-                       c.source
+                       c.source, c.owner_phone
                   FROM boutique_collections c ORDER BY c.created_at DESC, c.collection_id DESC""").getResultList()) {
             Object[] a = (Object[]) r;
             Map<String, Object> m = new LinkedHashMap<>();
@@ -81,6 +83,7 @@ public class CollectionService {
             m.put("available_count", a[10] == null ? 0 : ((Number) a[10]).intValue());
             m.put("instagram_url", a[11]);
             m.put("source", a[12]);
+            m.put("owner_phone", a[13]);
             out.add(m);
         }
         return out;
@@ -110,8 +113,8 @@ public class CollectionService {
         out.put("source", c[12]);
         out.put("shipping_extra", c[13]);
         boolean isWholesale = WHOLESALE.equals(c[3]);
-        List<Map<String, Object>> items = isWholesale ? wholesaleItems(id) : items(id);
         boolean isDropship = DROPSHIP.equals(c[3]);
+        List<Map<String, Object>> items = isWholesale ? wholesaleItems(id) : isDropship ? dropshipItems(id) : items(id);
         Optional<DropshipService.Supplier> supplier = isDropship ? dropship.supplier(c[8] == null ? null : ((Number) c[8]).intValue())
             : Optional.empty();
         DropshipService.Slabs slabs = dropship.parseSlabs((String) c[9], c[10] == null ? null : new BigDecimal(c[10].toString()));
@@ -133,6 +136,7 @@ public class CollectionService {
                      ORDER BY active DESC, created_at DESC""").setParameter(1, c[1]).getResultList();
             out.put("instagram_urls", ig);
             out.put("supplier_id", c[8]);
+            out.put("owner_phone", c[14]);
             out.put("supplier_name", supplier.map(DropshipService.Supplier::name).orElse(null));
             out.put("courier_slabs", slabs.perZone());
             out.put("courier_extra_per_piece", c[10]);
@@ -169,7 +173,7 @@ public class CollectionService {
         boolean numeric = codeOrId.matches("\\d{1,9}");
         List<?> rows = em.createNativeQuery("""
                 SELECT collection_id, code, name, collection_type, description, cover_image_url, ai_instructions, is_active,
-                       supplier_id, courier_slabs, courier_extra_per_piece, status, source, shipping_extra
+                       supplier_id, courier_slabs, courier_extra_per_piece, status, source, shipping_extra, owner_phone
                   FROM boutique_collections""" + (numeric ? " WHERE collection_id = CAST(?1 AS INTEGER)" : " WHERE UPPER(code) = UPPER(?1)"))
             .setParameter(1, codeOrId.trim()).getResultList();
         if (rows.isEmpty()) throw AgentApiException.notFound("COLLECTION_NOT_FOUND", "No collection " + codeOrId);
@@ -211,6 +215,72 @@ public class CollectionService {
             out.add(m);
         }
         return out;
+    }
+
+    /** Items of a DROPSHIP collection: their variants live in dropship_products (V21), not in Products. */
+    private List<Map<String, Object>> dropshipItems(int collectionId) {
+        List<?> rows = em.createNativeQuery("""
+                SELECT i.item_id, i.item_code, i.dropship_product_id, i.colour, i.image_url, d.image_url,
+                       d.product_name, d.selling_price, d.is_active, d.ai_instructions, d.description, d.cost_price, d.sizes,
+                       i.variant_no, i.secondary_desc, i.original_image_path, i.stamped_image_url, i.image_phash, i.status
+                  FROM boutique_collection_items i LEFT JOIN dropship_products d ON d.dropship_product_id = i.dropship_product_id
+                 WHERE i.collection_id = ?1 ORDER BY i.sort_order, i.item_id""")
+            .setParameter(1, collectionId).getResultList();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Object r : rows) {
+            Object[] a = (Object[]) r;
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("item_id", a[0]);
+            m.put("item_code", a[1]);
+            m.put("product_id", null);
+            m.put("dropship_product_id", a[2]);
+            m.put("colour", a[3]);
+            m.put("image_url", a[4] != null ? a[4] : a[5]);
+            m.put("product_name", a[6]);
+            m.put("unit", "pcs");
+            m.put("price", a[7] == null ? null : PricingService.money(new BigDecimal(a[7].toString())));
+            m.put("stock", BigDecimal.ZERO);   // the supplier holds the stock
+            m.put("available", a[6] != null && Boolean.TRUE.equals(a[8]));
+            m.put("ai_instructions", a[9]);
+            m.put("description", a[10]);
+            m.put("cost_price", a[11] == null ? null : PricingService.money(new BigDecimal(a[11].toString())));
+            List<Map<String, Object>> sizes = new ArrayList<>();
+            for (String size : sizeList((String) a[12])) sizes.add(Map.of("size", size, "stock", BigDecimal.ZERO));
+            m.put("sizes", sizes);
+            putVariant(m, a, 13);
+            out.add(m);
+        }
+        return out;
+    }
+
+    /** "S, M,L" -> [S, M, L]. */
+    public static List<String> sizeList(String sizes) {
+        if (sizes == null || sizes.isBlank()) return List.of();
+        return Arrays.stream(sizes.split(",")).map(String::trim).filter(x -> !x.isEmpty()).distinct().toList();
+    }
+
+    /** A new dropship variant (one colour). Returns its dropship_product_id. */
+    public int insertDropshipProduct(int collectionId, String name, String description, String category, BigDecimal cost,
+                                     BigDecimal price, String sizes, String tags, String imageUrl) {
+        Object id = em.createNativeQuery("""
+                INSERT INTO dropship_products (collection_id, product_name, description, category, cost_price, selling_price,
+                                               sizes, tags, image_url)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) RETURNING dropship_product_id""").unwrap(NativeQuery.class)
+            .setParameter(1, collectionId, Integer.class)
+            .setParameter(2, clip(name, 200), String.class)
+            .setParameter(3, description == null || description.isBlank() ? null : description.trim(), String.class)
+            .setParameter(4, category == null ? null : clip(category, 50), String.class)
+            .setParameter(5, cost, BigDecimal.class)
+            .setParameter(6, price, BigDecimal.class)
+            .setParameter(7, sizes == null || sizes.isBlank() ? null : clip(String.join(",", sizeList(sizes)), 200), String.class)
+            .setParameter(8, tags == null || tags.isBlank() ? null : tags, String.class)
+            .setParameter(9, imageUrl, String.class)
+            .getSingleResult();
+        return ((Number) id).intValue();
+    }
+
+    private static String clip(String s, int max) {
+        return s.length() > max ? s.substring(0, max) : s;
     }
 
     /** The V18 variant columns, starting at row index `from`. */
@@ -340,15 +410,17 @@ public class CollectionService {
         Set<BigDecimal> prices = new TreeSet<>();
         for (Map<String, Object> i : items) {
             String code = (String) i.get("item_code");
-            if (i.get("product_name") == null) { out.add(code + ": product no longer exists"); continue; }
+            if (i.get("product_name") == null) {
+                out.add(code + (DROPSHIP.equals(type) ? ": enter its name and price" : ": product no longer exists"));
+                continue;
+            }
             String unit = (String) i.get("unit");
             if (FABRIC.equals(type) && !isMetres(unit)) out.add(code + ": unit is '" + unit + "', fabric items must be sold in metres");
             if (READYMADE.equals(type) && !isPieces(unit)) out.add(code + ": unit is '" + unit + "', readymade items must be in pieces");
             if (READYMADE.equals(type) && ((List<?>) i.get("sizes")).isEmpty()) out.add(code + ": no sizes with stock entered in Products");
-            if (DROPSHIP.equals(type) && !isPieces(unit)) out.add(code + ": unit is '" + unit + "', dropship items must be in pieces");
-            if (DROPSHIP.equals(type) && i.get("cost_price") == null) out.add(code + ": no cost price (what the supplier charges) in Products");
+            if (DROPSHIP.equals(type) && i.get("cost_price") == null) out.add(code + ": no cost price (what the supplier charges)");
             if (!DROPSHIP.equals(type) && ((BigDecimal) i.get("stock")).signum() <= 0) out.add(code + ": out of stock");
-            if (!Boolean.TRUE.equals(i.get("available"))) out.add(code + ": product is inactive or not online");
+            if (!Boolean.TRUE.equals(i.get("available"))) out.add(code + (DROPSHIP.equals(type) ? ": inactive" : ": product is inactive or not online"));
             if (i.get("price") != null) prices.add((BigDecimal) i.get("price"));
         }
         if (prices.size() > 1) out.add("Items have different prices: " + prices + " – a collection usually has one price");
@@ -434,10 +506,16 @@ public class CollectionService {
         return get(String.valueOf(id), true);
     }
 
-    /** Replace the items: [{item_code, product_id (wholesale: wholesale_product_id), colour?, image_url?}] in display order. */
+    /**
+     * Replace the items: [{item_code, product_id (wholesale: wholesale_product_id), colour?, image_url?}] in display order.
+     * Dropship: {item_code, dropship_product_id?, product_name, price, cost_price?, sizes?, ...} - a variant without
+     * dropship_product_id is created in dropship_products; name / prices / sizes sent for an existing one update it.
+     */
     @Transactional
     public Map<String, Object> replaceItems(int collectionId, List<Map<String, Object>> items) {
-        boolean isWholesale = WHOLESALE.equals(header(String.valueOf(collectionId))[3]);
+        Object[] head = header(String.valueOf(collectionId));
+        boolean isWholesale = WHOLESALE.equals(head[3]);
+        boolean isDropship = DROPSHIP.equals(head[3]);
         String idKey = isWholesale ? "wholesale_product_id" : "product_id";
         if (items.size() > MAX_ITEMS) throw bad("At most " + MAX_ITEMS + " items per collection");
         Set<String> codes = new HashSet<>();
@@ -445,7 +523,13 @@ public class CollectionService {
             String code = str(item.get("item_code")).toUpperCase(Locale.ROOT);
             if (!code.matches(CODE)) throw bad("Item code '" + code + "' must be 2-30 letters, digits or '-', e.g. MCS-1A");
             if (!codes.add(code)) throw bad("Item code " + code + " is used twice");
-            if (!(item.get(idKey) instanceof Number)) throw bad("Choose a " + (isWholesale ? "wholesale " : "") + "product for " + code);
+            if (isDropship) {
+                if (!(item.get("dropship_product_id") instanceof Number) && (str(item.get("product_name")).isEmpty() || str(item.get("price")).isEmpty())) {
+                    throw bad("Enter the name and selling price of " + code);
+                }
+            } else if (!(item.get(idKey) instanceof Number)) {
+                throw bad("Choose a " + (isWholesale ? "wholesale " : "") + "product for " + code);
+            }
         }
         if (!codes.isEmpty()) {
             List<?> elsewhere = em.createNativeQuery("""
@@ -470,17 +554,19 @@ public class CollectionService {
             Object[] a = (Object[]) r;
             kept.put((String) a[0], Arrays.copyOfRange(a, 1, 7));
         }
+        Map<String, Integer> dropshipIds = isDropship ? saveDropshipProducts(collectionId, items) : Map.of();
         em.createNativeQuery("DELETE FROM boutique_collection_items WHERE collection_id = ?1").setParameter(1, collectionId).executeUpdate();
         int order = 0;
         for (Map<String, Object> item : items) {
             em.createNativeQuery("""
                     INSERT INTO boutique_collection_items (collection_id, item_code, product_id, colour, image_url, sort_order,
                                                            wholesale_product_id, variant_no, secondary_desc, original_image_path,
-                                                           stamped_image_url, image_phash, status)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)""").unwrap(NativeQuery.class)
+                                                           stamped_image_url, image_phash, status, dropship_product_id)
+                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)""").unwrap(NativeQuery.class)
                 .setParameter(1, collectionId, Integer.class)
                 .setParameter(2, str(item.get("item_code")).toUpperCase(Locale.ROOT), String.class)
-                .setParameter(3, isWholesale ? null : ((Number) item.get("product_id")).intValue(), Integer.class)
+                .setParameter(3, isWholesale || isDropship ? null : ((Number) item.get("product_id")).intValue(), Integer.class)
+                .setParameter(14, dropshipIds.get(str(item.get("item_code")).toUpperCase(Locale.ROOT)), Integer.class)
                 .setParameter(7, isWholesale ? ((Number) item.get(idKey)).intValue() : null, Integer.class)
                 .setParameter(8, variantNo(variant(item, kept, 0)), Integer.class)
                 .setParameter(9, (String) variant(item, kept, 1), String.class)
@@ -493,7 +579,73 @@ public class CollectionService {
                 .setParameter(6, order++, Integer.class)
                 .executeUpdate();
         }
+        if (isDropship) {   // variants removed from the collection
+            em.createNativeQuery("""
+                    DELETE FROM dropship_products d WHERE d.collection_id = ?1
+                       AND NOT EXISTS (SELECT 1 FROM boutique_collection_items i WHERE i.dropship_product_id = d.dropship_product_id)""")
+                .setParameter(1, collectionId).executeUpdate();
+        }
         return get(String.valueOf(collectionId), true);
+    }
+
+    /** Creates / updates the dropship_products rows of the items. ITEM CODE -> dropship_product_id. */
+    private Map<String, Integer> saveDropshipProducts(int collectionId, List<Map<String, Object>> items) {
+        Map<String, Integer> out = new HashMap<>();
+        for (Map<String, Object> item : items) {
+            String code = str(item.get("item_code")).toUpperCase(Locale.ROOT);
+            String name = str(item.get("product_name"));
+            BigDecimal price = str(item.get("price")).isEmpty() ? null : money(item.get("price"), code + " price");
+            if (price != null && price.signum() <= 0) throw bad(code + ": the selling price must be more than 0");
+            boolean hasCost = item.containsKey("cost_price");
+            BigDecimal cost = str(item.get("cost_price")).isEmpty() ? null : money(item.get("cost_price"), code + " cost price");
+            if (cost != null && cost.signum() < 0) throw bad(code + ": the cost price can't be negative");
+            if (item.get("dropship_product_id") instanceof Number n) {
+                int id = n.intValue();
+                List<?> owner = em.createNativeQuery("SELECT collection_id FROM dropship_products WHERE dropship_product_id = ?1")
+                    .setParameter(1, id).getResultList();
+                if (owner.isEmpty() || owner.get(0) == null || ((Number) owner.get(0)).intValue() != collectionId) {
+                    throw bad(code + ": that variant belongs to another collection");
+                }
+                em.createNativeQuery("""
+                        UPDATE dropship_products SET product_name = COALESCE(?1, product_name), selling_price = COALESCE(?2, selling_price),
+                               cost_price = CASE WHEN ?3 THEN ?4 ELSE cost_price END,
+                               sizes = CASE WHEN ?5 THEN ?6 ELSE sizes END, updated_at = NOW()
+                         WHERE dropship_product_id = ?7""").unwrap(NativeQuery.class)
+                    .setParameter(1, name.isEmpty() ? null : clip(name, 200), String.class)
+                    .setParameter(2, price, BigDecimal.class)
+                    .setParameter(3, hasCost, Boolean.class)
+                    .setParameter(4, cost, BigDecimal.class)
+                    .setParameter(5, item.containsKey("sizes"), Boolean.class)
+                    .setParameter(6, sizesText(item.get("sizes")), String.class)
+                    .setParameter(7, id, Integer.class)
+                    .executeUpdate();
+                out.put(code, id);
+            } else {
+                out.put(code, insertDropshipProduct(collectionId, name, null, null, cost, price, sizesText(item.get("sizes")), null,
+                    nullable(item.get("image_url"))));
+            }
+        }
+        return out;
+    }
+
+    /** sizes as "S,M,L" from a list (["S","M"] or [{size:"S"}]) or a text; null = free size. */
+    private static String sizesText(Object raw) {
+        List<String> labels = new ArrayList<>();
+        if (raw instanceof Collection<?> c) {
+            for (Object o : c) labels.add(o instanceof Map<?, ?> m ? str(m.get("size")) : str(o));
+        } else {
+            labels.addAll(sizeList(str(raw)));
+        }
+        String joined = String.join(",", labels.stream().filter(x -> !x.isEmpty()).distinct().toList());
+        return joined.isEmpty() ? null : clip(joined, 200);
+    }
+
+    private static BigDecimal money(Object raw, String label) {
+        try {
+            return new BigDecimal(str(raw).replace(",", "").replace("₹", "")).setScale(2, java.math.RoundingMode.HALF_UP);
+        } catch (NumberFormatException e) {
+            throw bad(label + " must be a number");
+        }
     }
 
     /** A V18 variant field: from the request if it has the key, else the stored value for that item code. */

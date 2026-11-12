@@ -60,7 +60,7 @@ public class DropshipApprovalService {
     public Map<String, Object> updateVariant(int collectionId, String itemCode, Map<String, Object> body) {
         requireDropship(collectionId);
         List<?> rows = em.createNativeQuery("""
-                SELECT product_id FROM boutique_collection_items WHERE collection_id = ?1 AND UPPER(item_code) = UPPER(?2)""")
+                SELECT dropship_product_id FROM boutique_collection_items WHERE collection_id = ?1 AND UPPER(item_code) = UPPER(?2)""")
             .setParameter(1, collectionId).setParameter(2, itemCode).getResultList();
         if (rows.isEmpty()) throw AgentApiException.notFound("ITEM_NOT_FOUND", "No variant " + itemCode + " in this collection");
         if (body.get("status") != null) {
@@ -83,7 +83,8 @@ public class DropshipApprovalService {
         requireDropship(collectionId);
         BigDecimal price = price(rawPrice);
         @SuppressWarnings("unchecked")
-        List<Object> ids = em.createNativeQuery("SELECT product_id FROM boutique_collection_items WHERE collection_id = ?1 AND product_id IS NOT NULL")
+        List<Object> ids = em.createNativeQuery("""
+                SELECT dropship_product_id FROM boutique_collection_items WHERE collection_id = ?1 AND dropship_product_id IS NOT NULL""")
             .setParameter(1, collectionId).getResultList();
         setPrice(ids.stream().map(o -> ((Number) o).intValue()).toList(), price);
         return collections.get(String.valueOf(collectionId), true);
@@ -91,10 +92,11 @@ public class DropshipApprovalService {
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private void setPrice(List<Integer> productIds, BigDecimal price) {
-        if (productIds.isEmpty()) return;
-        em.createNativeQuery("UPDATE products SET selling_price = ?1, updated_at = NOW() WHERE product_id IN (?2)")
-            .setParameter(1, price).setParameter(2, productIds).executeUpdate();
+    /** Selling price of dropship variants (dropship_products, V21). */
+    private void setPrice(List<Integer> dropshipProductIds, BigDecimal price) {
+        if (dropshipProductIds.isEmpty()) return;
+        em.createNativeQuery("UPDATE dropship_products SET selling_price = ?1, updated_at = NOW() WHERE dropship_product_id IN (?2)")
+            .setParameter(1, price).setParameter(2, dropshipProductIds).executeUpdate();
     }
 
     private void setStatus(int collectionId, String status) {

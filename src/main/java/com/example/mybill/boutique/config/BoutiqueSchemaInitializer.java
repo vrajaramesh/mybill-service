@@ -52,7 +52,11 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
         "db/boutique/V17__wholesale_collections.sql",
         "db/boutique/V18__wa_intake_dropship.sql",
         "db/boutique/V19__dropship_supplier_choice.sql",
-        "db/boutique/V20__dropship_owner_numbers.sql");
+        "db/boutique/V20__dropship_owner_numbers.sql",
+        "db/boutique/V21__dropship_products.sql");
+
+    /** Version of V21 (dropship variants moved out of Products). */
+    private static final int DROPSHIP_PRODUCTS_VERSION = 21;
 
     /** Public-schema objects (idempotent, run on every startup). */
     static final String PUBLIC_SCRIPT = "db/boutique/public_razorpay_webhook_events.sql";
@@ -112,6 +116,41 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
         }
     }
 
+    /**
+     * After V21: delete the Products rows the dropship variants were moved from (with their photos and sizes). Each one
+     * under its own savepoint: a product something else still uses (an invoice, another collection) is kept.
+     */
+    private void removeMovedDropshipProducts(Connection conn, String schema) throws Exception {
+        List<Integer> ids = new java.util.ArrayList<>();
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("""
+                 SELECT DISTINCT d.legacy_product_id FROM dropship_products d
+                  WHERE d.legacy_product_id IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM boutique_collection_items i WHERE i.product_id = d.legacy_product_id)""")) {
+            while (rs.next()) ids.add(rs.getInt(1));
+        }
+        int removed = 0;
+        for (Integer id : ids) {
+            java.sql.Savepoint sp = conn.setSavepoint();
+            try (PreparedStatement images = conn.prepareStatement("DELETE FROM product_images WHERE product_id = ?");
+                 PreparedStatement sizes = conn.prepareStatement("DELETE FROM product_size_stock WHERE product_id = ?");
+                 PreparedStatement product = conn.prepareStatement("DELETE FROM products WHERE product_id = ?")) {
+                for (PreparedStatement ps : List.of(images, sizes, product)) {
+                    ps.setInt(1, id);
+                    ps.executeUpdate();
+                }
+                conn.releaseSavepoint(sp);
+                removed++;
+            } catch (java.sql.SQLException e) {
+                conn.rollback(sp);
+                System.out.println("[BoutiqueSchema] " + schema + ": dropship product " + id + " kept in Products (still used: "
+                    + e.getMessage() + ")");
+            }
+        }
+        System.out.println("[BoutiqueSchema] " + schema + ": " + removed + " of " + ids.size()
+            + " dropship product(s) moved out of Products");
+    }
+
     /** Customers whose phone looks like a number but could not get a unique phone_e164 (shared by several rows). */
     private void reportUnlinkedPhones(Connection conn, String schema) throws Exception {
         try (Statement st = conn.createStatement();
@@ -166,6 +205,9 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
                         ins.executeUpdate();
                     }
                     System.out.println("[BoutiqueSchema] Applied " + script + " to schema " + schema);
+                }
+                if (current < DROPSHIP_PRODUCTS_VERSION && SCRIPTS.size() >= DROPSHIP_PRODUCTS_VERSION) {
+                    removeMovedDropshipProducts(conn, schema);
                 }
                 if (current < SCRIPTS.size()) reportUnlinkedPhones(conn, schema);
                 conn.commit();

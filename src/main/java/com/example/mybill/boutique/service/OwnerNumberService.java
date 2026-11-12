@@ -37,6 +37,33 @@ public class OwnerNumberService {
         return list().stream().filter(OwnerNumber::active).map(OwnerNumber::phone).toList();
     }
 
+    /**
+     * The owner who forwarded a dropship collection's post (V21 owner_phone, else its intake batch's sender); empty for
+     * a collection made by hand in mybill. Each owner is their own user: questions about the collection go only to them.
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> ownerOfCollection(int collectionId) {
+        List<?> r = em.createNativeQuery("""
+                SELECT COALESCE(c.owner_phone, (SELECT b.from_number FROM wa_intake_batch b WHERE b.collection_id = c.collection_id
+                                                 ORDER BY b.batch_id DESC LIMIT 1))
+                  FROM boutique_collections c WHERE c.collection_id = ?1""").setParameter(1, collectionId).getResultList();
+        return r.isEmpty() || r.get(0) == null ? Optional.empty() : Optional.of(String.valueOf(r.get(0)));
+    }
+
+    /** ownerOfCollection for the collection of an item code (e.g. KSS1211-03). */
+    @Transactional(readOnly = true)
+    public Optional<String> ownerOfItem(String itemCode) {
+        List<?> r = em.createNativeQuery("SELECT collection_id FROM boutique_collection_items WHERE UPPER(item_code) = UPPER(?1)")
+            .setParameter(1, itemCode == null ? "" : itemCode.trim()).getResultList();
+        return r.isEmpty() ? Optional.empty() : ownerOfCollection(((Number) r.get(0)).intValue());
+    }
+
+    /** Who to ask about a collection: its owner, or every active owner number when it has none (made by hand). */
+    @Transactional(readOnly = true)
+    public List<String> recipientsFor(Optional<String> owner) {
+        return owner.map(List::of).orElseGet(this::activePhones);
+    }
+
     /** Add or update (phone in any format: 9441249575, +91 94412 49575, 919441249575). */
     @Transactional
     public OwnerNumber save(Map<String, Object> body) {
