@@ -26,8 +26,9 @@ import java.util.stream.Collectors;
 
 /**
  * WhatsApp → Dropship, phase 5: an approved dropship collection is posted to the dropship Instagram account
- * (dropship.instagram.username, default @srisa_sarees - never the shop's main account) as carousel posts of up to
- * 10 code-stamped photos, each post saved as an Ad & post link (IG_MEDIA → collection) so "Chat on WhatsApp" from it
+ * (dropship.instagram.username, default @srisa_sarees - never the shop's main account) as ONE post: a carousel of
+ * the first 10 code-stamped photos (Instagram's limit; the caption says every colour is on WhatsApp, where the
+ * customer sees all of them), saved as an Ad & post link (IG_MEDIA → collection) so "Chat on WhatsApp" from it
  * opens that collection; its variants are pushed to the Meta catalog with a WhatsApp link per code.
  *
  * Graph API with META_ACCESS_TOKEN (system user): /me/accounts finds the Page whose Instagram account has that
@@ -78,15 +79,12 @@ public class DropshipPublishService {
         } else {
             try {
                 Account acc = account();
-                List<List<Map<String, Object>>> posts = chunks(items);
-                for (int p = 0; p < posts.size(); p++) {
-                    String mediaId = post(acc, posts.get(p), caption(c, posts.get(p), p + 1, posts.size()));
-                    String permalink = field(acc, mediaId, "permalink");
-                    saveLink(code, mediaId, permalink, "Instagram @" + acc.username() + " " + code
-                        + (posts.size() > 1 ? " (" + (p + 1) + "/" + posts.size() + ")" : ""));
-                    links.add(permalink);
-                    log.info("DROPSHIP_IG_POSTED collection={} media={} {}", code, mediaId, permalink);
-                }
+                List<Map<String, Object>> shown = items.subList(0, Math.min(CAROUSEL_MAX, items.size()));
+                String mediaId = post(acc, shown, caption(c, shown, items.size()));
+                String permalink = field(acc, mediaId, "permalink");
+                saveLink(code, mediaId, permalink, "Instagram @" + acc.username() + " " + code);
+                links.add(permalink);
+                log.info("DROPSHIP_IG_POSTED collection={} media={} photos={}/{} {}", code, mediaId, shown.size(), items.size(), permalink);
             } catch (Exception e) {
                 log.error("DROPSHIP_IG_FAILED collection={}: {}", code, e.toString());
                 errors.add("Instagram: " + e.getMessage());
@@ -169,21 +167,8 @@ public class DropshipPublishService {
         return get(graphUrl + "/" + id + "?fields=" + field + "&access_token=" + enc(acc.pageToken())).path(field).asText(null);
     }
 
-    static List<List<Map<String, Object>>> chunks(List<Map<String, Object>> items) {
-        List<List<Map<String, Object>>> out = new ArrayList<>();
-        for (int i = 0; i < items.size(); i += CAROUSEL_MAX) out.add(items.subList(i, Math.min(i + CAROUSEL_MAX, items.size())));
-        // avoid a lonely last post of 1: move one photo over (e.g. 11 -> 9 + 2)
-        if (out.size() > 1 && out.get(out.size() - 1).size() == 1) {
-            List<Map<String, Object>> prev = new ArrayList<>(out.get(out.size() - 2));
-            List<Map<String, Object>> last = new ArrayList<>(out.get(out.size() - 1));
-            last.add(0, prev.remove(prev.size() - 1));
-            out.set(out.size() - 2, prev);
-            out.set(out.size() - 1, last);
-        }
-        return out;
-    }
-
-    String caption(Map<String, Object> c, List<Map<String, Object>> items, int part, int parts) {
+    /** items = the photos in the post (≤10); total = every available colour (all of them are shown on WhatsApp). */
+    String caption(Map<String, Object> c, List<Map<String, Object>> items, int total) {
         StringBuilder s = new StringBuilder();
         s.append("✨ ").append(c.get("name")).append(" ✨\n");
         if (c.get("description") != null && !String.valueOf(c.get("description")).isBlank()) s.append(c.get("description")).append('\n');
@@ -193,13 +178,14 @@ public class DropshipPublishService {
             s.append("\n💰 ₹").append(price.setScale(0, RoundingMode.HALF_UP).toPlainString())
                 .append(Boolean.FALSE.equals(c.get("shipping_extra")) ? "" : " + shipping").append('\n');
         }
-        s.append("🎨 ").append(items.size()).append(" colours in this post")
-            .append(parts > 1 ? " (" + part + "/" + parts + ")" : "").append(":\n");
+        s.append("🎨 ").append(total).append(total == 1 ? " colour" : " colours")
+            .append(total > items.size() ? " – " + items.size() + " here, all " + total + " on WhatsApp" : "").append(":\n");
         for (Map<String, Object> it : items) {
             s.append("• ").append(it.get("item_code")).append(it.get("colour") == null ? "" : " – " + it.get("colour")).append('\n');
         }
         s.append("\n📲 To order, tap Chat on WhatsApp or message +").append(shopWhatsapp)
-            .append(" with the code, e.g. ").append(items.get(0).get("item_code")).append('\n');
+            .append(" with the code, e.g. ").append(items.get(0).get("item_code"))
+            .append(total > items.size() ? " – we'll send you photos of all " + total + " colours" : "").append('\n');
         s.append("Code: ").append(c.get("code")).append("\n\n");
         s.append(hashtags((Integer) c.get("collection_id")));
         String out = s.toString();
