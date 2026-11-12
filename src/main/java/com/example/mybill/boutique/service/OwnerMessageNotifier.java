@@ -35,4 +35,24 @@ public class OwnerMessageNotifier {
         if (m.buttons() != null) body.put("buttons", m.buttons());
         notifier.post(body, "owner.message " + m.eventId());
     }
+
+    /** "Is it available?" to a supplier (template; srisa-agent falls back to the owner if it can't be sent). */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onSupplierCheck(DropshipCustomerService.SupplierCheck m) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("event", "owner.message");
+        body.put("event_id", m.eventId());
+        body.put("order_no", "-");
+        body.put("customer_phone", m.to());
+        body.put("kind", "supplier_check");
+        body.put("text", m.fallbackText());
+        if (m.imageUrl() != null) body.put("image_url", m.imageUrl());
+        body.put("template_params", m.params());
+        body.put("button_payloads", m.payloads());
+        body.put("fallback_to", m.fallbackTo());
+        if (m.fallbackImageUrl() != null) body.put("fallback_image_url", m.fallbackImageUrl());
+        body.put("buttons", m.fallbackButtons());
+        notifier.post(body, "owner.message " + m.eventId());
+    }
 }

@@ -346,7 +346,7 @@ public class DropshipExtractionService {
             byte[] original = download(it.originalUrl());
             tiles.add(new CollageService.Tile(it.label(), original));
             try {
-                byte[] stamped = stamper.stampCode(original, it.itemCode());
+                byte[] stamped = stamper.stampCode(original, it.label());   // just the number (01, 02 ...)
                 stampedUrls.put(it.itemCode(), gcs.uploadToPath(stamped, "image/jpeg",
                     "dropship/" + saved.code() + "/stamped/" + it.itemCode() + ".jpg"));
             } catch (Exception e) {
@@ -361,6 +361,40 @@ public class DropshipExtractionService {
             log.warn("DROPSHIP_COLLAGE_FAILED code={}: {}", saved.code(), e.toString());
         }
         return new Images(stampedUrls, collage);
+    }
+
+    /**
+     * Stamps the photos of an existing collection again (variant numbers 01, 02 ... instead of full codes), to a new
+     * file so cached copies of the old photo don't linger. Returns how many photos were re-stamped.
+     */
+    public int restamp(int collectionId) {
+        List<Object[]> rows = tx.execute(s -> {
+            @SuppressWarnings("unchecked")
+            List<Object[]> r = em.createNativeQuery("""
+                    SELECT i.item_code, COALESCE(i.variant_no, 0), i.original_image_path, c.code
+                      FROM boutique_collection_items i JOIN boutique_collections c ON c.collection_id = i.collection_id
+                     WHERE i.collection_id = ?1 AND i.original_image_path IS NOT NULL ORDER BY i.sort_order""")
+                .setParameter(1, collectionId).getResultList();
+            return r;
+        });
+        int n = 0;
+        String version = String.valueOf(System.currentTimeMillis() / 1000);
+        for (Object[] r : rows) {
+            String itemCode = (String) r[0];
+            int no = ((Number) r[1]).intValue();
+            String label = String.format("%02d", no > 0 ? no : n + 1);
+            try {
+                byte[] stamped = stamper.stampCode(download((String) r[2]), label);
+                String url = gcs.uploadToPath(stamped, "image/jpeg", "dropship/" + r[3] + "/stamped/" + itemCode + "-" + version + ".jpg");
+                tx.executeWithoutResult(s -> em.createNativeQuery(
+                        "UPDATE boutique_collection_items SET stamped_image_url = ?1, image_url = ?1 WHERE UPPER(item_code) = UPPER(?2)")
+                    .setParameter(1, url).setParameter(2, itemCode).executeUpdate());
+                n++;
+            } catch (Exception e) {
+                log.warn("DROPSHIP_RESTAMP_FAILED item={}: {}", itemCode, e.toString());
+            }
+        }
+        return n;
     }
 
     /** Items show the stamped photo (the original stays in original_image_path); the owner gets the collage + summary. */

@@ -9,6 +9,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,7 +34,37 @@ public class AgentDropshipController {
         schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
         int quantity = body.get("quantity") instanceof Number n ? n.intValue() : 1;
         return customers.askAvailability(str(body.get("item_code")), str(body.get("conversation_id")),
-            str(body.get("customer_name")), str(body.get("customer_phone")), quantity);
+            str(body.get("customer_name")), str(body.get("customer_phone")), quantity, Boolean.TRUE.equals(body.get("escalate")));
+    }
+
+    /** Someone answered Yes / No. {item_code, quantity, answer y|n, answered_by, customer_name} → {role}. */
+    @PostMapping("/availability-answered")
+    public Map<String, Object> availabilityAnswered(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        int quantity = body.get("quantity") instanceof Number n ? n.intValue() : 1;
+        return customers.answered(str(body.get("item_code")), quantity, "y".equalsIgnoreCase(str(body.get("answer"))),
+            str(body.get("answered_by")), str(body.get("customer_name")));
+    }
+
+    /** Active suppliers' WhatsApp numbers (the AI must not answer them). */
+    @GetMapping("/supplier-numbers")
+    public Map<String, List<String>> supplierNumbers() {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return Map.of("numbers", customers.supplierNumbers());
+    }
+
+    /** A supplier's message that isn't a Yes / No tap: forwarded to the owner. {from, text}. */
+    @PostMapping("/supplier-message")
+    public Map<String, Object> supplierMessage(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return customers.supplierMessage(str(body.get("from")), str(body.get("text")));
+    }
+
+    /** Stamp a collection's photos again (variant numbers 01, 02 ...). {collection_id} → {restamped}. */
+    @PostMapping("/restamp")
+    public Map<String, Object> restamp(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        return Map.of("restamped", extraction.restamp(Integer.parseInt(str(body.get("collection_id")))));
     }
 
     /** The owner said the variant is not available: SOLD_OUT. */
