@@ -27,12 +27,13 @@ public class AgentDropshipController {
 
     @Autowired private com.example.mybill.boutique.service.DropshipCustomerService customers;
 
-    /** A customer wants to buy a dropship variant: ask the owner(s) Yes / No. {item_code, conversation_id, customer_name, customer_phone}. */
+    /** A customer wants to buy a dropship variant: ask the owner(s) Yes / No. {item_code, conversation_id, customer_name, customer_phone, quantity}. */
     @PostMapping("/availability")
     public Map<String, Object> availability(@RequestBody Map<String, Object> body) {
         schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        int quantity = body.get("quantity") instanceof Number n ? n.intValue() : 1;
         return customers.askAvailability(str(body.get("item_code")), str(body.get("conversation_id")),
-            str(body.get("customer_name")), str(body.get("customer_phone")));
+            str(body.get("customer_name")), str(body.get("customer_phone")), quantity);
     }
 
     /** The owner said the variant is not available: SOLD_OUT. */

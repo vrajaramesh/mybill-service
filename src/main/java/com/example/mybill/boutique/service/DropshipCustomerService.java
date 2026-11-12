@@ -30,15 +30,18 @@ public class DropshipCustomerService {
 
     /** Ask the collection's owner "Is MGP1111-07 available with {supplier}?". Returns {asked: n}. */
     @Transactional(readOnly = true)
-    public Map<String, Object> askAvailability(String itemCode, String conversationId, String customerName, String customerPhone) {
+    public Map<String, Object> askAvailability(String itemCode, String conversationId, String customerName, String customerPhone,
+                                               int quantity) {
+        int pieces = Math.max(quantity, 1);
         Object[] row = itemRow(itemCode);
         String code = (String) row[0], colour = (String) row[1], collection = (String) row[2];
         DropshipService.Supplier s = row[3] == null ? null : dropship.supplier(((Number) row[3]).intValue()).orElse(null);
         String supplier = s == null ? "the supplier" : s.name() + (s.phone() == null ? "" : " (" + s.phone() + ")");
         String who = (customerName == null || customerName.isBlank() ? "A customer" : customerName)
             + (customerPhone == null || customerPhone.isBlank() ? "" : " (+" + customerPhone.replaceAll("\\D", "") + ")");
-        String text = "🛒 " + who + " wants " + code + (colour == null ? "" : " – " + colour) + " (" + collection + ").\n"
-            + "Is " + code + " available with " + supplier + "?";
+        String text = "🛒 " + who + " wants " + code + (colour == null ? "" : " – " + colour) + " (" + collection + ")"
+            + (pieces > 1 ? " × " + pieces + " pieces" : "") + ".\n"
+            + "Is " + code + (pieces > 1 ? " (" + pieces + " pieces)" : "") + " available with " + supplier + "?";
         List<Map<String, String>> buttons = List.of(
             Map.of("id", AVAIL + "y:" + conversationId + ":" + code, "title", "✅ Yes"),
             Map.of("id", AVAIL + "n:" + conversationId + ":" + code, "title", "❌ No"));
