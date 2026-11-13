@@ -186,7 +186,8 @@ public class DropshipBoostService {
             String adsetId = post("/" + act() + "/adsets", adset);
             String creativeId = post("/" + act() + "/adcreatives", Map.of("name", name,
                 "object_id", acc.pageId(), "instagram_user_id", acc.igUserId(), "source_instagram_media_id", mediaId,
-                "call_to_action", json.writeValueAsString(Map.of("type", "WHATSAPP_MESSAGE", "value", Map.of("app_destination", "WHATSAPP")))));
+                "call_to_action", json.writeValueAsString(Map.of("type", "WHATSAPP_MESSAGE",
+                    "value", Map.of("app_destination", "WHATSAPP", "link", "https://api.whatsapp.com/send")))));
             String adId = post("/" + act() + "/ads", Map.of("name", name, "adset_id", adsetId,
                 "creative", json.writeValueAsString(Map.of("creative_id", creativeId)), "status", "ACTIVE"));
             String cid = campaignId;
