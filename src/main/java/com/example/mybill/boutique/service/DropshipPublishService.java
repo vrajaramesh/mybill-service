@@ -9,7 +9,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
@@ -244,7 +247,40 @@ public class DropshipPublishService {
             requests.add(Map.of("method", "UPDATE", "retailer_id", code, "data", data));
         }
         if (requests.isEmpty()) return 0;
-        Map<String, Object> payload = Map.of("item_type", "PRODUCT_ITEM", "allow_upsert", true, "requests", requests);
+        catalogBatch(requests, true);
+        return requests.size();
+    }
+
+    /** Variants that sold out, or a collection that was archived: show them "out of stock" in the Meta catalog. */
+    public record CatalogOutOfStock(List<String> itemCodes) {}
+
+    /** After the sold-out / archive is committed (published from a transaction). Never throws. */
+    @Async
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onOutOfStock(CatalogOutOfStock e) {
+        if (!catalogEnabled || e.itemCodes().isEmpty()) return;
+        try {
+            catalogBatch(e.itemCodes().stream().map(code -> Map.<String, Object>of("method", "UPDATE", "retailer_id", code,
+                "data", Map.of("availability", "out of stock"))).toList(), false);   // never creates an item
+            log.info("DROPSHIP_CATALOG_OUT_OF_STOCK items={}", e.itemCodes());
+        } catch (Exception ex) {
+            log.warn("Catalog out-of-stock failed for {}: {}", e.itemCodes(), ex.getMessage());
+        }
+    }
+
+    /** A purged collection: remove its variants from the Meta catalog. Never throws. */
+    public void catalogDelete(List<String> itemCodes) {
+        if (!catalogEnabled || itemCodes.isEmpty()) return;
+        try {
+            catalogBatch(itemCodes.stream().map(code -> Map.<String, Object>of("method", "DELETE", "retailer_id", code)).toList(), false);
+        } catch (Exception ex) {
+            log.warn("Catalog delete failed for {}: {}", itemCodes, ex.getMessage());
+        }
+    }
+
+    private void catalogBatch(List<Map<String, Object>> requests, boolean upsert) {
+        if (catalogId == null || catalogId.isBlank() || accessToken == null || accessToken.isBlank()) return;
+        Map<String, Object> payload = Map.of("item_type", "PRODUCT_ITEM", "allow_upsert", upsert, "requests", requests);
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(graphUrl + "/" + catalogId + "/items_batch"))
                 .header("Content-Type", "application/json").header("Authorization", "Bearer " + accessToken)
@@ -257,7 +293,6 @@ public class DropshipPublishService {
         } catch (Exception e) {
             throw new IllegalStateException(e.getMessage(), e);
         }
-        return requests.size();
     }
 
     // ── HTTP helpers ─────────────────────────────────────────────────────────

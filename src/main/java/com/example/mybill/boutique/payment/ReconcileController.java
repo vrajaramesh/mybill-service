@@ -1,14 +1,13 @@
 package com.example.mybill.boutique.payment;
 
-import com.example.mybill.boutique.config.AgentTokenVerifier;
 import com.example.mybill.boutique.config.BoutiqueSchemaInitializer;
+import com.example.mybill.boutique.config.SchedulerJobAuth;
 import com.example.mybill.dto.Firm;
 import com.example.mybill.repository.FirmRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -17,7 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * POST /internal/jobs/reconcile-payments - run by Cloud Scheduler every 10 minutes (TenantFilter skips /internal/).
@@ -29,13 +27,7 @@ import java.util.Set;
 public class ReconcileController {
 
     private static final Logger log = LoggerFactory.getLogger(ReconcileController.class);
-    private static final Set<String> GOOGLE_ISSUERS = Set.of("accounts.google.com", "https://accounts.google.com");
-
-    @Value("${reconcile.allowed-sa-email:}") private String allowedEmail;
-    @Value("${agent.api.audience:}") private String audience;
-    @Value("${reconcile.auth-enabled:true}") private boolean authEnabled;
-
-    @Autowired private AgentTokenVerifier tokenVerifier;
+    @Autowired private SchedulerJobAuth auth;
     @Autowired private FirmRepository firmRepository;
     @Autowired private BoutiqueSchemaInitializer schemaInitializer;
     @Autowired private PaymentLinkService paymentLinkService;
@@ -44,21 +36,8 @@ public class ReconcileController {
 
     @PostMapping("/internal/jobs/reconcile-payments")
     public ResponseEntity<Map<String, Object>> reconcile(@RequestHeader(value = "Authorization", required = false) String authorization) {
-        if (authEnabled) {
-            if (allowedEmail.isBlank() || audience.isBlank()) {
-                return ResponseEntity.status(503).body(Map.of("error", "not_configured"));
-            }
-            if (authorization == null || !authorization.startsWith("Bearer ")) {
-                return ResponseEntity.status(401).body(Map.of("error", "unauthorized"));
-            }
-            var token = tokenVerifier.verify(authorization.substring(7).trim(), audience);
-            if (token.isEmpty() || !GOOGLE_ISSUERS.contains(token.get().issuer())) {
-                return ResponseEntity.status(401).body(Map.of("error", "unauthorized"));
-            }
-            if (!token.get().emailVerified() || !allowedEmail.equalsIgnoreCase(String.valueOf(token.get().email()))) {
-                return ResponseEntity.status(403).body(Map.of("error", "forbidden"));
-            }
-        }
+        var rejected = auth.reject(authorization);
+        if (rejected.isPresent()) return rejected.get();
 
         Map<String, Object> summary = new LinkedHashMap<>();
         int checked = 0, paid = 0, closed = 0, errors = 0;

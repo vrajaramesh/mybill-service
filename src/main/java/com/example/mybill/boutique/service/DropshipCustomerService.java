@@ -139,6 +139,7 @@ public class DropshipCustomerService {
         int n = em.createNativeQuery("UPDATE boutique_collection_items SET status = 'SOLD_OUT' WHERE UPPER(item_code) = UPPER(?1)")
             .setParameter(1, itemCode.trim()).executeUpdate();
         if (n == 0) throw AgentApiException.notFound("ITEM_NOT_FOUND", "No collection item " + itemCode);
+        events.publishEvent(new DropshipPublishService.CatalogOutOfStock(List.of(itemCode.trim().toUpperCase(Locale.ROOT))));
         return Map.of("item_code", itemCode.trim().toUpperCase(Locale.ROOT), "status", "SOLD_OUT");
     }
 

@@ -13,7 +13,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -57,6 +60,30 @@ public class GcsUploadService implements ImageUploadService {
         } catch (Exception e) {
             throw new RuntimeException("GCS file upload error: " + e.getMessage(), e);
         }
+    }
+
+    /** An object in the bucket: its name (e.g. dropship/KSS1211/collage.jpg) and when it was written. */
+    public record StoredObject(String name, Instant created) {}
+
+    /** Every object whose name starts with prefix. */
+    public List<StoredObject> list(String prefix) {
+        List<StoredObject> out = new ArrayList<>();
+        for (var blob : storage.list(bucketName, Storage.BlobListOption.prefix(prefix)).iterateAll()) {
+            out.add(new StoredObject(blob.getName(), blob.getCreateTimeOffsetDateTime() == null ? Instant.EPOCH
+                : blob.getCreateTimeOffsetDateTime().toInstant()));
+        }
+        return out;
+    }
+
+    /** Delete one object; false if it was already gone. */
+    public boolean delete(String objectName) {
+        return storage.delete(BlobId.of(bucketName, objectName));
+    }
+
+    /** The object name of one of our public URLs (https://storage.googleapis.com/{bucket}/{name}); null for any other URL. */
+    public String objectName(String url) {
+        String base = "https://storage.googleapis.com/" + bucketName + "/";
+        return url != null && url.startsWith(base) ? url.substring(base.length()) : null;
     }
 
     /** Upload to a chosen object name (e.g. dropship/12/original/3.jpg); returns the public URL. Overwrites. */

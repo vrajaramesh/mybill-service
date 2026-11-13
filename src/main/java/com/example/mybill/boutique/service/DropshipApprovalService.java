@@ -46,6 +46,10 @@ public class DropshipApprovalService {
     public Map<String, Object> archive(int collectionId, String by) {
         Map<String, Object> c = requireDropship(collectionId);
         setStatus(collectionId, "ARCHIVED");
+        @SuppressWarnings("unchecked")
+        List<String> codes = em.createNativeQuery("SELECT item_code FROM boutique_collection_items WHERE collection_id = ?1")
+            .setParameter(1, collectionId).getResultList();
+        events.publishEvent(new DropshipPublishService.CatalogOutOfStock(codes));
         batch(collectionId).ifPresent(b -> {
             if (WaIntakeBatch.AWAITING_APPROVAL.equals(b.getStatus())) {
                 b.setStatus(WaIntakeBatch.SKIPPED);
@@ -70,6 +74,9 @@ public class DropshipApprovalService {
             }
             em.createNativeQuery("UPDATE boutique_collection_items SET status = ?1 WHERE collection_id = ?2 AND UPPER(item_code) = UPPER(?3)")
                 .setParameter(1, status).setParameter(2, collectionId).setParameter(3, itemCode).executeUpdate();
+            if (CollectionService.SOLD_OUT.equals(status)) {
+                events.publishEvent(new DropshipPublishService.CatalogOutOfStock(List.of(itemCode.trim().toUpperCase(Locale.ROOT))));
+            }
         }
         if (body.get("price") != null && rows.get(0) != null) {
             setPrice(List.of(((Number) rows.get(0)).intValue()), price(body.get("price")));
