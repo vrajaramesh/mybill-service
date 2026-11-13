@@ -53,7 +53,8 @@ public class BoutiqueSchemaInitializer implements ApplicationRunner {
         "db/boutique/V18__wa_intake_dropship.sql",
         "db/boutique/V19__dropship_supplier_choice.sql",
         "db/boutique/V20__dropship_owner_numbers.sql",
-        "db/boutique/V21__dropship_products.sql");
+        "db/boutique/V21__dropship_products.sql",
+        "db/boutique/V22__dropship_boosts.sql");
 
     /** Version of V21 (dropship variants moved out of Products). */
     private static final int DROPSHIP_PRODUCTS_VERSION = 21;

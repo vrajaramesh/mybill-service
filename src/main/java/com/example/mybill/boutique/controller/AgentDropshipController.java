@@ -127,6 +127,17 @@ public class AgentDropshipController {
             "error", r.error() == null ? "" : r.error());
     }
 
+    @Autowired private com.example.mybill.boutique.service.DropshipBoostService boosts;
+
+    /** Boost a posted collection (the owner tapped budget + audience). Body {collection_id, days, audience, owner}. */
+    @PostMapping("/boost")
+    public Map<String, Object> boost(@RequestBody Map<String, Object> body) {
+        schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
+        String owner = body.get("owner") == null ? null : String.valueOf(body.get("owner")).replaceAll("\\D", "");
+        return boosts.boost(Integer.parseInt(String.valueOf(body.get("collection_id"))),
+            Integer.parseInt(String.valueOf(body.get("days"))), String.valueOf(body.get("audience")), owner);
+    }
+
     /** Re-run a FAILED post (owner command RETRY n). Body {batch_id}. */
     @PostMapping("/retry")
     public Map<String, Object> retry(@RequestBody Map<String, Object> body) {

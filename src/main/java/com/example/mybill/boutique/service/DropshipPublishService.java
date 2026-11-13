@@ -107,12 +107,13 @@ public class DropshipPublishService {
 
     // ── Instagram ────────────────────────────────────────────────────────────
 
-    private record Account(String igUserId, String username, String pageToken) {}
+    /** The dropship Instagram account and its Facebook Page (boosting uses pageId too). */
+    record Account(String igUserId, String username, String pageToken, String pageId) {}
 
     /** The Page whose Instagram account is @{dropship.instagram.username}, with that Page's token. */
     Account account() {
         if (accessToken == null || accessToken.isBlank()) throw new IllegalStateException("META_ACCESS_TOKEN is not set");
-        JsonNode pages = get(graphUrl + "/me/accounts?fields=name,access_token,instagram_business_account%7Bid,username%7D&limit=100"
+        JsonNode pages = get(graphUrl + "/me/accounts?fields=id,name,access_token,instagram_business_account%7Bid,username%7D&limit=100"
             + "&access_token=" + enc(accessToken));
         List<String> seen = new ArrayList<>();
         for (JsonNode p : pages.path("data")) {
@@ -120,7 +121,7 @@ public class DropshipPublishService {
             String user = ig.path("username").asText("");
             if (!user.isEmpty()) seen.add("@" + user);
             if (user.equalsIgnoreCase(igUsername.replaceFirst("^@", ""))) {
-                return new Account(ig.path("id").asText(), user, p.path("access_token").asText());
+                return new Account(ig.path("id").asText(), user, p.path("access_token").asText(), p.path("id").asText());
             }
         }
         throw new IllegalStateException("@" + igUsername + " is not reachable with mybill's Meta token (it can post to "

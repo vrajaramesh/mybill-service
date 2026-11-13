@@ -52,6 +52,7 @@ public class DropshipIntakeService {
 
     @Value("${dropship.intake.idle-seconds:60}") private int idleSeconds;
     @Autowired @org.springframework.context.annotation.Lazy private DropshipApprovalService approval;
+    @Autowired @org.springframework.context.annotation.Lazy private DropshipBoostService boosts;
 
     /** Button ids on "Draft ready": approve / edit price / skip a draft collection. */
     public static final String APPROVE = "dsok:", EDIT_PRICE = "dsprice:", SKIP = "dsskip:";
@@ -258,6 +259,13 @@ public class DropshipIntakeService {
         if (replyId != null && (replyId.startsWith(APPROVE) || replyId.startsWith(EDIT_PRICE) || replyId.startsWith(SKIP))) {
             return approvalTap(owner, replyId);
         }
+        if (replyId != null && (replyId.startsWith(DropshipBoostService.BOOST) || replyId.startsWith(DropshipBoostService.AUDIENCE))) {
+            return boosts.tap(owner, replyId);
+        }
+        Matcher stopBoost = Pattern.compile("(?i)^stop\\s+boost\\s+([A-Z0-9-]+)$").matcher(t);
+        if (stopBoost.matches()) return boosts.stop(owner, stopBoost.group(1));
+        Matcher boostCmd = Pattern.compile("(?i)^boost\\s+([A-Z0-9-]+)$").matcher(t);
+        if (boostCmd.matches()) return boosts.boostCommand(owner, boostCmd.group(1));
         Matcher priceCmd = Pattern.compile("(?i)^price\\s+(?:([A-Z0-9-]+)\\s+)?₹?\\s*(\\d{2,6})(?:\\.\\d{1,2})?$").matcher(t);
         if (priceCmd.matches()) {
             return priceCommand(owner, priceCmd.group(1), priceCmd.group(2));
@@ -392,6 +400,10 @@ public class DropshipIntakeService {
                     + (r.catalogItems() > 0 ? "\n🛍️ " + r.catalogItems() + " colours added to the Meta catalog" : "")
                     + (r.error() == null ? "" : "\n⚠️ " + r.error());
             tell(b, "text", text, null, null);
+            if (!r.permalinks().isEmpty()) {
+                boosts.offer(collectionId, code, ownerNumbers.ownerOfCollection(collectionId).orElse(b.getFromNumber()))
+                    .ifPresent(events::publishEvent);
+            }
             if (!r.permalinks().isEmpty() && WaIntakeBatch.APPROVED.equals(b.getStatus())) b.setStatus(WaIntakeBatch.PUBLISHED);
         });
     }
