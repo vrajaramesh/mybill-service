@@ -129,12 +129,13 @@ public class AgentDropshipController {
 
     @Autowired private com.example.mybill.boutique.service.DropshipBoostService boosts;
 
-    /** Boost a posted collection (the owner tapped budget + audience). Body {collection_id, days, audience, owner}. */
+    /** Boost a posted collection (the owner tapped budget, days, audience). Body {collection_id, daily_budget, days, audience, owner}. */
     @PostMapping("/boost")
     public Map<String, Object> boost(@RequestBody Map<String, Object> body) {
         schemaInitializer.ensureSchema(TenantContext.getCurrentTenant());
         String owner = body.get("owner") == null ? null : String.valueOf(body.get("owner")).replaceAll("\\D", "");
         return boosts.boost(Integer.parseInt(String.valueOf(body.get("collection_id"))),
+            Integer.parseInt(String.valueOf(body.getOrDefault("daily_budget", 200))),
             Integer.parseInt(String.valueOf(body.get("days"))), String.valueOf(body.get("audience")), owner);
     }
 

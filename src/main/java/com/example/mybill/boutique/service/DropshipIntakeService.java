@@ -259,7 +259,8 @@ public class DropshipIntakeService {
         if (replyId != null && (replyId.startsWith(APPROVE) || replyId.startsWith(EDIT_PRICE) || replyId.startsWith(SKIP))) {
             return approvalTap(owner, replyId);
         }
-        if (replyId != null && (replyId.startsWith(DropshipBoostService.BOOST) || replyId.startsWith(DropshipBoostService.AUDIENCE))) {
+        if (replyId != null && (replyId.startsWith(DropshipBoostService.BOOST) || replyId.startsWith(DropshipBoostService.DAYS)
+            || replyId.startsWith(DropshipBoostService.AUDIENCE))) {
             return boosts.tap(owner, replyId);
         }
         Matcher stopBoost = Pattern.compile("(?i)^stop\\s+boost\\s+([A-Z0-9-]+)$").matcher(t);

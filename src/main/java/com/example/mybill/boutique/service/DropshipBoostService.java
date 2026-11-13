@@ -28,7 +28,8 @@ import java.util.stream.Collectors;
 /**
  * Boosting a dropship collection's Instagram post as a Click-to-WhatsApp ad (Meta Marketing API, META_ACCESS_TOKEN
  * with ads_management, ad account META_AD_ACCOUNT_ID). After a post goes up, the owner who forwarded it gets
- * "📣 Boost?" [₹200 × 1 day] [₹200 × 2 days] [No], then the audience [Hyderabad] [Telangana + AP] [All India].
+ * "📣 Boost?" with a list of daily budgets (₹200 … ₹600, or No), then [1 day] [2 days] [3 days], then the audience
+ * [Hyderabad] [Telangana + AP] [All India].
  * The ad's "Send message" opens a WhatsApp chat with the shop; the ad id is saved as an AD marketing link to the
  * collection, so the agent opens that collection and orders are attributed to it. Never spends without a tap; at
  * most dropship.boost.monthly-cap (₹5,000) a calendar month (IST). STOP BOOST {code} pauses it; a daily summary
@@ -40,8 +41,9 @@ public class DropshipBoostService {
     private static final Logger log = LoggerFactory.getLogger(DropshipBoostService.class);
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
-    /** Button ids: dsboost:{collectionId}:{days} (0 = no), dsaud:{collectionId}:{days}:{audience}. */
-    public static final String BOOST = "dsboost:", AUDIENCE = "dsaud:";
+    /** Reply ids: dsboost:{collectionId}:{dailyBudget} (0 = no), dsdays:{collectionId}:{budget}:{days},
+     *  dsaud:{collectionId}:{budget}:{days}:{audience} (older buttons: dsaud:{collectionId}:{days}:{audience} = ₹200). */
+    public static final String BOOST = "dsboost:", DAYS = "dsdays:", AUDIENCE = "dsaud:";
     public static final List<String> AUDIENCES = List.of("HYDERABAD", "TS_AP", "INDIA");
 
     @PersistenceContext private EntityManager em;
@@ -54,7 +56,8 @@ public class DropshipBoostService {
     @Value("${meta.access.token:}") private String accessToken;
     @Value("${meta.ads.account-id:}") private String adAccountId;
     @Value("${meta.ads.graph-url:https://graph.facebook.com/v23.0}") private String graphUrl;
-    @Value("${dropship.boost.daily-budget:200}") private BigDecimal dailyBudget;
+    @Value("${dropship.boost.daily-budgets:200,300,400,500,600}") private List<Integer> dailyBudgets;
+    @Value("${dropship.boost.max-days:3}") private int maxDays;
     @Value("${dropship.boost.monthly-cap:5000}") private BigDecimal monthlyCap;
     @Value("${dropship.boost.age-min:22}") private int ageMin;
     @Value("${dropship.boost.age-max:55}") private int ageMax;
@@ -71,20 +74,22 @@ public class DropshipBoostService {
     /** "Boost it?" after a post goes up (only when an ad account is configured). */
     public Optional<DropshipIntakeService.OwnerMessage> offer(int collectionId, String code, String owner) {
         if (!configured() || owner == null) return Optional.empty();
-        String b = dailyBudget.stripTrailingZeros().toPlainString();
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (int b : dailyBudgets) {
+            rows.add(Map.of("id", BOOST + collectionId + ":" + b, "title", "₹" + b + " a day",
+                "description", "1–" + maxDays + " days: ₹" + b + "–₹" + b * maxDays));
+        }
+        rows.add(Map.of("id", BOOST + collectionId + ":0", "title", "No boost"));
         return Optional.of(new DropshipIntakeService.OwnerMessage(owner, "boost-offer:" + collectionId + ":" + UUID.randomUUID(),
-            "buttons", "📣 Boost " + code + " on Instagram? People who tap it get a WhatsApp chat with us about " + code
-                + ".\n₹" + b + " a day" + spentLine(), null, null, null, null,
-            List.of(Map.of("id", BOOST + collectionId + ":1", "title", "₹" + b + " × 1 day"),
-                Map.of("id", BOOST + collectionId + ":2", "title", "₹" + b + " × 2 days"),
-                Map.of("id", BOOST + collectionId + ":0", "title", "No boost"))));
+            "list", "📣 Boost " + code + " on Instagram? People who tap it get a WhatsApp chat with us about " + code
+                + ".\nChoose a daily budget, then the number of days." + spentLine(), "Choose budget",
+            List.of(Map.of("title", "Daily budget", "rows", rows)), null, null));
     }
 
     /** A tap on the boost / audience buttons, or STOP BOOST {code}. {handled, action, ...}; action "boost" → the agent calls /boost. */
     public Map<String, Object> tap(String owner, String replyId) {
         String[] f = replyId.split(":");
         int collectionId = Integer.parseInt(f[1]);
-        int days = Integer.parseInt(f[2]);
         String code = code(collectionId);
         Optional<String> postedBy = ownerNumbers.ownerOfCollection(collectionId);
         if (postedBy.isPresent() && !postedBy.get().equals(owner)) {
@@ -92,16 +97,24 @@ public class DropshipBoostService {
             return Map.of("handled", true, "action", "not_yours");
         }
         if (replyId.startsWith(BOOST)) {
-            if (days <= 0) {
+            int budget = Integer.parseInt(f[2]);
+            if (budget <= 0) {
                 tell(owner, "👍 " + code + " won't be boosted. Send *BOOST " + code + "* any time to boost it later.");
                 return Map.of("handled", true, "action", "boost_declined");
             }
-            return askAudience(owner, collectionId, code, days);
+            if (!dailyBudgets.contains(budget)) return Map.of("handled", false, "reason", "bad_boost_tap");
+            return askDays(owner, collectionId, code, budget);
         }
-        String audience = f.length > 3 ? f[3] : "";
-        if (!AUDIENCES.contains(audience) || days < 1 || days > 2) return Map.of("handled", false, "reason", "bad_boost_tap");
+        boolean old = replyId.startsWith(AUDIENCE) && f.length == 4;   // dsaud:{id}:{days}:{audience} from before budgets
+        int budget = old ? 200 : Integer.parseInt(f[2]);
+        int days = Integer.parseInt(old ? f[2] : f[3]);
+        if (!dailyBudgets.contains(budget) || days < 1 || days > maxDays) return Map.of("handled", false, "reason", "bad_boost_tap");
+        if (replyId.startsWith(DAYS)) return askAudience(owner, collectionId, code, budget, days);
+        String audience = old ? f[3] : f.length > 4 ? f[4] : "";
+        if (!AUDIENCES.contains(audience)) return Map.of("handled", false, "reason", "bad_boost_tap");
         tell(owner, "⏳ Creating the boost for " + code + "…");
-        return Map.of("handled", true, "action", "boost", "collection_id", collectionId, "days", days, "audience", audience);
+        return Map.of("handled", true, "action", "boost", "collection_id", collectionId, "daily_budget", budget, "days", days,
+            "audience", audience);
     }
 
     /** BOOST {code}: the buttons again (e.g. after "No boost"). */
@@ -120,23 +133,45 @@ public class DropshipBoostService {
         return Map.of("handled", true, "action", "boost_offer");
     }
 
-    private Map<String, Object> askAudience(String owner, int collectionId, String code, int days) {
+    /** 1 / 2 / 3 days at that daily budget - only the ones that still fit this month's cap. */
+    private Map<String, Object> askDays(String owner, int collectionId, String code, int budget) {
+        BigDecimal left = monthlyCap.subtract(monthSpend());
+        List<Map<String, String>> buttons = new ArrayList<>();
+        for (int d = 1; d <= maxDays; d++) {
+            if (total(budget, d).compareTo(left) <= 0) {
+                buttons.add(Map.of("id", DAYS + collectionId + ":" + budget + ":" + d,
+                    "title", d + (d == 1 ? " day" : " days") + " · ₹" + total(budget, d).toPlainString()));
+            }
+        }
+        if (buttons.isEmpty()) {
+            tell(owner, "⚠️ Only ₹" + left.max(BigDecimal.ZERO).toPlainString() + " of this month's ₹" + monthlyCap.toPlainString()
+                + " boost limit is left – choose a smaller daily budget (send *BOOST " + code + "*).");
+            return Map.of("handled", true, "action", "boost_over_cap");
+        }
+        events.publishEvent(new DropshipIntakeService.OwnerMessage(owner, "boost-days:" + collectionId + ":" + UUID.randomUUID(),
+            "buttons", "₹" + budget + " a day for " + code + " – for how many days?", null, null, null, null, buttons));
+        return Map.of("handled", true, "action", "boost_days");
+    }
+
+    private Map<String, Object> askAudience(String owner, int collectionId, String code, int budget, int days) {
+        String id = AUDIENCE + collectionId + ":" + budget + ":" + days + ":";
         events.publishEvent(new DropshipIntakeService.OwnerMessage(owner, "boost-aud:" + collectionId + ":" + UUID.randomUUID(),
-            "buttons", "Who should see " + code + "? (₹" + total(days).toPlainString() + " for " + days + (days == 1 ? " day" : " days")
-                + ", women " + ageMin + "–" + ageMax + ")", null, null, null, null,
-            List.of(Map.of("id", AUDIENCE + collectionId + ":" + days + ":HYDERABAD", "title", "Hyderabad"),
-                Map.of("id", AUDIENCE + collectionId + ":" + days + ":TS_AP", "title", "Telangana + AP"),
-                Map.of("id", AUDIENCE + collectionId + ":" + days + ":INDIA", "title", "All India"))));
+            "buttons", "Who should see " + code + "? (₹" + budget + " × " + days + (days == 1 ? " day" : " days") + " = ₹"
+                + total(budget, days).toPlainString() + ", women " + ageMin + "–" + ageMax + ")", null, null, null, null,
+            List.of(Map.of("id", id + "HYDERABAD", "title", "Hyderabad"),
+                Map.of("id", id + "TS_AP", "title", "Telangana + AP"),
+                Map.of("id", id + "INDIA", "title", "All India"))));
         return Map.of("handled", true, "action", "boost_audience");
     }
 
     // ── creating the ad ──────────────────────────────────────────────────────
 
     /** Campaign → ad set (lifetime budget, WhatsApp destination) → creative from the IG post → ad. Tells the owner. */
-    public Map<String, Object> boost(int collectionId, int days, String audience, String owner) {
+    public Map<String, Object> boost(int collectionId, int budget, int days, String audience, String owner) {
         String code = code(collectionId);
         String to = owner != null ? owner : ownerNumbers.ownerOfCollection(collectionId).orElse(null);
-        BigDecimal total = total(days);
+        BigDecimal dailyBudget = BigDecimal.valueOf(budget), total = total(budget, days);
+        if (!dailyBudgets.contains(budget) || days < 1 || days > maxDays) return fail(to, null, code, "₹" + budget + " × " + days + " isn't an option");
         if (!configured()) return fail(to, null, code, "boosting isn't set up (META_AD_ACCOUNT_ID)");
         BigDecimal used = monthSpend();
         if (used.add(total).compareTo(monthlyCap) > 0) {
@@ -203,7 +238,7 @@ public class DropshipBoostService {
                     .setParameter(1, adId).setParameter(2, code).setParameter(3, "Boost " + code + " #" + boostId).executeUpdate();
             });
             log.info("DROPSHIP_BOOST collection={} boost={} ad={} days={} audience={}", code, boostId, adId, days, audience);
-            tell(to, "✅ " + code + " boost created: ₹" + total.toPlainString() + " for " + days + (days == 1 ? " day" : " days")
+            tell(to, "✅ " + code + " boost created: ₹" + budget + " × " + days + (days == 1 ? " day" : " days") + " = ₹" + total.toPlainString()
                 + ", " + audienceName(audience) + ". Meta reviews it first (usually minutes, sometimes a few hours), then it starts."
                 + "\nTo stop it early: *STOP BOOST " + code + "*");
             return Map.of("boosted", true, "boost_id", boostId, "ad_id", adId);
@@ -345,8 +380,8 @@ public class DropshipBoostService {
         events.publishEvent(new DropshipIntakeService.OwnerMessage(to, "boost:" + UUID.randomUUID(), "text", text, null, null, null, null));
     }
 
-    private BigDecimal total(int days) {
-        return dailyBudget.multiply(BigDecimal.valueOf(days)).stripTrailingZeros().setScale(0, java.math.RoundingMode.HALF_UP);
+    private static BigDecimal total(int budget, int days) {
+        return BigDecimal.valueOf((long) budget * days);
     }
 
     private static String audienceName(String a) {
