@@ -93,7 +93,7 @@ public class DropshipPublishService {
                     log.warn("DROPSHIP_IG_PERMALINK_FAILED collection={} media={}: {}", code, mediaId, pe.toString());
                     permalink = null;
                 }
-                if (permalink == null || permalink.isBlank()) permalink = "https://www.instagram.com/" + acc.username() + "/";
+                if (permalink == null || permalink.isBlank()) permalink = "https://www.instagram.com/" + acc.username() + "/?media=" + mediaId; // unique: permalink is unique per source_type
                 saveLink(code, mediaId, permalink, "Instagram @" + acc.username() + " " + code);
                 links.add(permalink);
                 log.info("DROPSHIP_IG_POSTED collection={} media={} photos={}/{} {}", code, mediaId, shown.size(), items.size(), permalink);
