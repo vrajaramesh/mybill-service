@@ -84,7 +84,16 @@ public class DropshipPublishService {
                 Account acc = account();
                 List<Map<String, Object>> shown = items.subList(0, Math.min(CAROUSEL_MAX, items.size()));
                 String mediaId = post(acc, shown, caption(c, shown, items.size()));
-                String permalink = field(acc, mediaId, "permalink");
+                // The post is live once media_publish returns an id. Fetching its permalink is one more Graph
+                // call that can hit the app rate limit - don't report a live post as "NOT posted" because of it.
+                String permalink;
+                try {
+                    permalink = field(acc, mediaId, "permalink");
+                } catch (Exception pe) {
+                    log.warn("DROPSHIP_IG_PERMALINK_FAILED collection={} media={}: {}", code, mediaId, pe.toString());
+                    permalink = null;
+                }
+                if (permalink == null || permalink.isBlank()) permalink = "https://www.instagram.com/" + acc.username() + "/";
                 saveLink(code, mediaId, permalink, "Instagram @" + acc.username() + " " + code);
                 links.add(permalink);
                 log.info("DROPSHIP_IG_POSTED collection={} media={} photos={}/{} {}", code, mediaId, shown.size(), items.size(), permalink);
