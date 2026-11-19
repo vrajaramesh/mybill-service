@@ -182,13 +182,23 @@ public class DropshipBoostService {
                 SELECT COUNT(*) FROM dropship_boosts WHERE collection_id = ?1 AND status IN ('CREATING', 'ACTIVE') AND ends_at > NOW()""")
             .setParameter(1, collectionId).getSingleResult()).longValue());
         if (running != null && running > 0) return fail(to, null, code, "it is already being boosted");
-        String mediaId = tx.execute(s -> {
+        String savedMediaId = tx.execute(s -> {
             List<?> r = em.createNativeQuery("""
                     SELECT source_id FROM marketing_links WHERE source_type = 'IG_MEDIA' AND collection_code = ?1
                      ORDER BY created_at DESC LIMIT 1""").setParameter(1, code).getResultList();
             return r.isEmpty() ? null : String.valueOf(r.get(0));
         });
-        if (mediaId == null) return fail(to, null, code, "it isn't on Instagram yet – approve and post it first");
+        String linked = savedMediaId;
+        if (linked == null) {
+            try {
+                linked = publisher.linkLivePost(code);   // posted, but the link wasn't saved (Instagram answered with an error)
+            } catch (Exception e) {
+                log.warn("DROPSHIP_BOOST_LOOKUP_FAILED collection={}: {}", code, e.getMessage());
+                return fail(to, null, code, "couldn't check Instagram right now (" + e.getMessage() + ") – try again in a few minutes");
+            }
+        }
+        if (linked == null) return fail(to, null, code, "it isn't on Instagram yet – approve and post it first");
+        final String mediaId = linked;
 
         Instant start = Instant.now(), end = start.plus(Duration.ofDays(days));
         int boostId = tx.execute(s -> ((Number) em.createNativeQuery("""

@@ -187,6 +187,21 @@ public class DropshipPublishService {
         }
     }
 
+    /**
+     * For a collection with no saved Instagram link: find its post on the dropship account (e.g. one Instagram
+     * published while answering with an error) and save the link. Returns the media id, or null if it isn't there.
+     */
+    public String linkLivePost(String code) {
+        Account acc = account();
+        String[] live = findLive(acc, code);
+        if (live == null) return null;
+        String permalink = live[1] == null || live[1].isBlank()
+            ? "https://www.instagram.com/" + acc.username() + "/?media=" + live[0] : live[1];
+        saveLink(code, live[0], permalink, "Instagram @" + acc.username() + " " + code);
+        log.info("DROPSHIP_IG_LINKED_LIVE collection={} media={} {}", code, live[0], permalink);
+        return live[0];
+    }
+
     /** The account's recent post whose caption carries "Code: <code>", as {media id, permalink}; null if none. */
     String[] findLive(Account acc, String code) {
         JsonNode media = get(graphUrl + "/" + acc.igUserId() + "/media?fields=id,permalink,caption&limit=25&access_token=" + enc(acc.pageToken()));
