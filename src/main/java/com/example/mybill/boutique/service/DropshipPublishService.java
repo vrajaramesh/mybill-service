@@ -83,15 +83,27 @@ public class DropshipPublishService {
             try {
                 Account acc = account();
                 List<Map<String, Object>> shown = items.subList(0, Math.min(CAROUSEL_MAX, items.size()));
-                String mediaId = post(acc, shown, caption(c, shown, items.size()));
-                // The post is live once media_publish returns an id. Fetching its permalink is one more Graph
-                // call that can hit the app rate limit - don't report a live post as "NOT posted" because of it.
+                // A previous attempt may already be live (Instagram can publish and still answer "request limit
+                // reached"): attach that post instead of posting a duplicate. Skipped on an explicit repost.
+                String[] live = repost ? null : findLive(acc, code);
+                String mediaId;
                 String permalink;
-                try {
-                    permalink = field(acc, mediaId, "permalink");
-                } catch (Exception pe) {
-                    log.warn("DROPSHIP_IG_PERMALINK_FAILED collection={} media={}: {}", code, mediaId, pe.toString());
-                    permalink = null;
+                if (live != null) {
+                    mediaId = live[0];
+                    permalink = live[1];
+                    log.info("DROPSHIP_IG_FOUND_LIVE collection={} media={} - not posting again", code, mediaId);
+                } else {
+                    String[] posted = post(acc, shown, caption(c, shown, items.size()), code);
+                    mediaId = posted[0];
+                    permalink = posted[1];
+                }
+                if (permalink == null || permalink.isBlank()) {
+                    // The post is live; fetching its permalink is one more call that can hit the rate limit.
+                    try {
+                        permalink = field(acc, mediaId, "permalink");
+                    } catch (Exception pe) {
+                        log.warn("DROPSHIP_IG_PERMALINK_FAILED collection={} media={}: {}", code, mediaId, pe.toString());
+                    }
                 }
                 if (permalink == null || permalink.isBlank()) permalink = "https://www.instagram.com/" + acc.username() + "/?media=" + mediaId; // unique: permalink is unique per source_type
                 saveLink(code, mediaId, permalink, "Instagram @" + acc.username() + " " + code);
@@ -138,8 +150,8 @@ public class DropshipPublishService {
             + "@" + igUsername + " to a Facebook Page and assign that Page and the Instagram account to the system user.");
     }
 
-    /** One post: a single image, or a carousel of 2-10. Returns the published media id. */
-    private String post(Account acc, List<Map<String, Object>> items, String caption) throws InterruptedException {
+    /** One post: a single image, or a carousel of 2-10. Returns {media id, permalink or null}. */
+    private String[] post(Account acc, List<Map<String, Object>> items, String caption, String code) throws InterruptedException {
         String container;
         if (items.size() == 1) {
             container = create(acc, Map.of("image_url", photo(items.get(0)), "caption", caption));
@@ -150,9 +162,39 @@ public class DropshipPublishService {
             container = create(acc, Map.of("media_type", "CAROUSEL", "children", String.join(",", children), "caption", caption));
         }
         waitReady(acc, container);
-        JsonNode published = postForm(graphUrl + "/" + acc.igUserId() + "/media_publish",
-            Map.of("creation_id", container, "access_token", acc.pageToken()));
-        return published.path("id").asText();
+        try {
+            JsonNode published = postForm(graphUrl + "/" + acc.igUserId() + "/media_publish",
+                Map.of("creation_id", container, "access_token", acc.pageToken()));
+            return new String[]{published.path("id").asText(), null};
+        } catch (RuntimeException e) {
+            // Instagram often publishes the post and still answers with an error (typically "Application request
+            // limit reached"). Look for it on the account before telling the owner it failed.
+            log.warn("DROPSHIP_IG_PUBLISH_ERROR collection={} container={}: {} - checking whether it went live", code, container, e.getMessage());
+            for (int wait : new int[]{5, 15, 30, 60}) {
+                Thread.sleep(wait * 1000L);
+                try {
+                    String[] live = findLive(acc, code);
+                    if (live != null) {
+                        log.info("DROPSHIP_IG_LIVE_DESPITE_ERROR collection={} media={}", code, live[0]);
+                        return live;
+                    }
+                } catch (Exception check) {
+                    log.warn("DROPSHIP_IG_CHECK_FAILED collection={}: {}", code, check.getMessage());
+                }
+            }
+            throw new IllegalStateException(e.getMessage() + " (Instagram is rate-limiting mybill. If the post shows up "
+                + "on Instagram, tap Approve again in a few minutes - it will be linked, not posted twice.)", e);
+        }
+    }
+
+    /** The account's recent post whose caption carries "Code: <code>", as {media id, permalink}; null if none. */
+    String[] findLive(Account acc, String code) {
+        JsonNode media = get(graphUrl + "/" + acc.igUserId() + "/media?fields=id,permalink,caption&limit=25&access_token=" + enc(acc.pageToken()));
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?m)^Code: " + java.util.regex.Pattern.quote(code) + "\\s*$");
+        for (JsonNode m : media.path("data")) {
+            if (p.matcher(m.path("caption").asText("")).find()) return new String[]{m.path("id").asText(), m.path("permalink").asText(null)};
+        }
+        return null;
     }
 
     private String create(Account acc, Map<String, String> params) {
